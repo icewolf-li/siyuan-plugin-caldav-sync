@@ -515,9 +515,9 @@ assert.strictEqual(
 const calInput = document.querySelector('input[data-f="calendar"]');
 assert.ok(calInput && calInput.type === "hidden", "编辑弹窗应用隐藏 input 保存日历值（自定义下拉）");
 const calTrigger = document.querySelector(".caldav-editor .caldav-cal-trigger");
-const calHead = document.querySelector(".caldav-editor .caldav-cal-head");
-assert.ok(calHead, "编辑弹窗应有「日历选择」分组标题");
-assert.ok(/日历选择/.test(calHead.textContent || ""), "分组标题应为「日历选择」");
+const calHead = document.querySelector(".caldav-editor .caldav-title-cal-label");
+assert.ok(calHead, "编辑弹窗应有「日历」标签");
+assert.ok(/日历/.test(calHead.textContent || ""), "标题行标签应为「日历」");
 assert.ok(calTrigger, "编辑弹窗应保留日历自定义下拉触发按钮（有多个日历时可切换）");
 assert.ok(calTrigger.closest(".caldav-input-wrap").querySelector(".caldav-cal-icon"), "日历下拉左侧图标应为日历颜色图标");
 const calPop = document.querySelector(".caldav-editor .caldav-cal-pop");
@@ -534,7 +534,7 @@ if (opt2) {
   assert.ok(calPop.hidden, "点选后弹层应收起");
 }
 // 不应再渲染独立的“日历”字段标签（去掉冗余的「日历」文字行，下拉保留）
-assert.ok(!document.querySelector(".caldav-editor .caldav-cal-head .caldav-field-label"), "「日历选择」分组下不应再渲染独立的“日历”字段标签");
+assert.ok(!document.querySelector(".caldav-editor .caldav-title-cal-label .caldav-field-label"), "标题行「日历」标签下不应再渲染独立的“日历”字段标签");
 const calTitleRow = document.querySelector(".caldav-editor .caldav-title-head");
 assert.ok(calTitleRow, "编辑弹窗应有标题头部行（标题 + 开关同一行）");
 assert.ok(calTitleRow.querySelector('[data-f="aiParse"]'), "标题头部行应包含「粘贴自动识别日期」开关");

@@ -278,6 +278,25 @@ function editorHtml(
             <span class="caldav-switch-track"></span>
           </span>
         </label>
+        <div class="caldav-title-cal">
+          <span class="caldav-title-cal-label">日历</span>
+          <div class="caldav-input-wrap caldav-cal-wrap" style="--cal-color:${escape(calColorOf(cals, it.calendarUrl))}">
+            <span class="caldav-input-icon caldav-input-icon--static caldav-cal-icon">${icons.calendar}</span>
+            <input type="hidden" data-f="calendar" value="${escape(it.calendarUrl)}"/>
+            <button type="button" class="caldav-input caldav-cal-trigger" data-action="cal-toggle">
+              <span class="caldav-cal-name">${escape(cals.find((c) => c.url === it.calendarUrl)?.displayName || it.calendarUrl)}</span>
+              <span class="caldav-input-suffix">${icons.chevron}</span>
+            </button>
+            <div class="caldav-cal-pop" data-cal-pop hidden>
+              ${cals
+                .map(
+                  (c) =>
+                    `<button type="button" class="caldav-cal-option ${c.url === it.calendarUrl ? "is-active" : ""}" data-cal-url="${escape(c.url)}"><span class="caldav-cal-dot" style="background:${escape(calEventColor(c))}"></span>${escape(c.displayName)}</button>`
+                )
+                .join("")}
+            </div>
+          </div>
+        </div>
       </div>
       <div class="caldav-title-row">
         <div class="caldav-input-wrap caldav-title-wrap">
@@ -288,34 +307,20 @@ function editorHtml(
     </div>
 
     <div class="caldav-section caldav-section--card">
-      <div class="caldav-section-title caldav-cal-head"><span class="caldav-section-icon">${icons.calendar}</span>日历选择</div>
-      <div class="caldav-input-wrap" style="--cal-color:${escape(calColorOf(cals, it.calendarUrl))}">
-        <span class="caldav-input-icon caldav-input-icon--static caldav-cal-icon">${icons.calendar}</span>
-        <input type="hidden" data-f="calendar" value="${escape(it.calendarUrl)}"/>
-        <button type="button" class="caldav-input caldav-cal-trigger" data-action="cal-toggle">
-          <span class="caldav-cal-name">${escape(cals.find((c) => c.url === it.calendarUrl)?.displayName || it.calendarUrl)}</span>
-          <span class="caldav-input-suffix">${icons.chevron}</span>
-        </button>
-        <div class="caldav-cal-pop" data-cal-pop hidden>
-          ${cals
-            .map(
-              (c) =>
-                `<button type="button" class="caldav-cal-option ${c.url === it.calendarUrl ? "is-active" : ""}" data-cal-url="${escape(c.url)}"><span class="caldav-cal-dot" style="background:${escape(calEventColor(c))}"></span>${escape(c.displayName)}</button>`
-            )
-            .join("")}
+      <div class="caldav-section-title"><span class="caldav-section-icon">${icons.clock}</span>日期时间</div>
+      <div class="caldav-all-day-row">
+        <label class="caldav-switch-line caldav-all-day-switch">
+          <span class="caldav-switch-label">全天</span>
+          <span class="caldav-switch">
+            <input type="checkbox" data-f="allDay" ${it.allDay ? "checked" : ""}/>
+            <span class="caldav-switch-track"></span>
+          </span>
+        </label>
+        <div class="caldav-duration-row caldav-duration-row--inline" ${isTodo || it.allDay ? 'style="display:none"' : ""}>
+          <span class="caldav-datetime-label">持续</span>
+          <span class="caldav-duration-val" data-duration>${initialDuration}</span>
         </div>
       </div>
-    </div>
-
-    <div class="caldav-section caldav-section--card">
-      <div class="caldav-section-title"><span class="caldav-section-icon">${icons.clock}</span>日期时间</div>
-      <label class="caldav-switch-line">
-        <span class="caldav-switch-label">全天</span>
-        <span class="caldav-switch">
-          <input type="checkbox" data-f="allDay" ${it.allDay ? "checked" : ""}/>
-          <span class="caldav-switch-track"></span>
-        </span>
-      </label>
 
       <div class="caldav-datetime-row">
         <span class="caldav-datetime-label">开始</span>
@@ -335,11 +340,6 @@ function editorHtml(
           </div>
           <button class="caldav-input-clear caldav-input-clear--time" data-clear="startTime" title="清除时间" ${it.allDay ? 'style="display:none"' : ""}>${icons.trash}</button>
         </div>
-      </div>
-
-      <div class="caldav-duration-row" ${isTodo || it.allDay ? 'style="display:none"' : ""}>
-        <span class="caldav-datetime-label">持续</span>
-        <span class="caldav-duration-val" data-duration>${initialDuration}</span>
       </div>
 
       <div class="caldav-datetime-row">

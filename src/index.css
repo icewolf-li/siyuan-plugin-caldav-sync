@@ -2069,7 +2069,7 @@ input.caldav-input[type="time"]:hover::-webkit-calendar-picker-indicator {
   margin-bottom: 0;
 }
 
-/* 「日历选择」分组：保留日历自定义下拉，仅去掉冗余的「日历」字段标签行 */
+/* 日历标签：标题行中的「日历」文字，与下拉框放在同一行 */
 .caldav-cal-head {
   justify-content: flex-start;
 }
@@ -2088,16 +2088,18 @@ input.caldav-input[type="time"]:hover::-webkit-calendar-picker-indicator {
   color: var(--caldav-text);
 }
 
-/* 标题行头部：左侧标题、右侧「粘贴自动识别日期」开关，合并一行省空间 */
+/* 标题行头部：左侧标题、中间开关、右侧日历选择，合并一行省空间 */
 .caldav-title-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
   margin-bottom: 8px;
+  flex-wrap: nowrap;
 }
 .caldav-title-head .caldav-title-label {
   margin-bottom: 0;
+  flex: 0 0 auto;
 }
 .caldav-title-aiparse {
   flex: 0 0 auto;
@@ -2107,6 +2109,37 @@ input.caldav-input[type="time"]:hover::-webkit-calendar-picker-indicator {
   gap: 6px;
   font-size: 12px;
   color: var(--caldav-text-2);
+}
+.caldav-title-cal {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+.caldav-title-cal-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--caldav-text);
+  white-space: nowrap;
+}
+.caldav-title-cal .caldav-cal-wrap {
+  position: relative;
+  width: 140px;
+  min-width: 90px;
+  flex: 0 0 auto;
+}
+.caldav-title-cal .caldav-cal-trigger {
+  width: 100%;
+  height: 32px;
+  padding: 0 26px 0 30px;
+  border-radius: 8px;
+  background: var(--caldav-input-bg);
+  border: 1px solid var(--caldav-border);
+  font-size: 13px;
+}
+.caldav-title-cal .caldav-cal-icon {
+  left: 8px;
 }
 
 .caldav-title-wrap {
@@ -2224,11 +2257,28 @@ input.caldav-input[type="time"]:hover::-webkit-calendar-picker-indicator {
 
 .caldav-input-clear svg { width: 14px; height: 14px; }
 
+.caldav-all-day-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.caldav-all-day-switch {
+  flex: 0 0 auto;
+  border-bottom: none;
+  padding: 0;
+  margin-bottom: 0;
+}
+
 .caldav-duration-row {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 4px 0;
+}
+.caldav-duration-row--inline {
+  flex: 0 0 auto;
+  padding: 0;
 }
 
 .caldav-duration-val {
