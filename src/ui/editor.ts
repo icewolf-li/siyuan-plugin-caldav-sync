@@ -274,7 +274,7 @@ function editorHtml(
         <label class="caldav-switch-line caldav-title-aiparse">
           <span class="caldav-switch-label">粘贴自动识别日期</span>
           <span class="caldav-switch">
-            <input type="checkbox" data-f="aiParse"/>
+            <input type="checkbox" data-f="aiParse" ${it.aiParse === false ? "" : "checked"}/>
             <span class="caldav-switch-track"></span>
           </span>
         </label>

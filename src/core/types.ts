@@ -58,6 +58,8 @@ export interface CalItem {
   deleted?: boolean;
   /** 服务端 ICS 原文，编辑时在其基础上修改 */
   raw?: string;
+  /** 编辑器会话态：粘贴标题时自动识别其中的日期时间（仅编辑器内使用，不持久化到 ICS） */
+  aiParse?: boolean;
 }
 
 export interface CalCalendar {

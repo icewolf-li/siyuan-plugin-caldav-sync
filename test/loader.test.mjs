@@ -284,6 +284,24 @@ assert.ok(
 );
 document.querySelectorAll(".caldav-editor").forEach((e) => e.remove());
 
+// ---- 新建待办：不应显示「持续」时长，且「粘贴自动识别日期」默认开启 ----
+click(tabEl.querySelector('[data-action="new-todo"]'));
+const todoEditor = document.querySelector(".caldav-editor");
+assert.ok(todoEditor, "点击主面板「待办」应打开编辑弹窗");
+assert.ok(
+  /待办标题/.test(todoEditor.querySelector('[data-f="summary"]').getAttribute("placeholder") || ""),
+  "新建待办标题占位应为「请输入待办标题」"
+);
+// 待办没有「持续」时长概念 → 持续时间行必须隐藏（初始化即 display:none）
+const todoDur = todoEditor.querySelector(".caldav-duration-row");
+assert.ok(todoDur, "待办弹窗应仍保留 duration-row（便于全天切换时复用）");
+assert.strictEqual(todoDur.style.display, "none", "待办的持续时间行必须隐藏（display:none）");
+// 粘贴自动识别日期：默认开启（新建即生效，仅当显式关闭才关）
+const aiParseBox = todoEditor.querySelector('[data-f="aiParse"]');
+assert.ok(aiParseBox, "待办弹窗应包含「粘贴自动识别日期」开关");
+assert.strictEqual(aiParseBox.checked, true, "「粘贴自动识别日期」应默认开启");
+document.querySelectorAll(".caldav-editor").forEach((e) => e.remove());
+
 // 待办在日历上按「到期日」落位：跨日待办（开始今天/到期明天）不应落在今天
 const cellsWithCross = [...tabEl.querySelectorAll(".cal-month-cell")].filter((c) =>
   c.textContent.includes("跨日待办")
