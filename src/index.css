@@ -238,6 +238,8 @@
   line-height: 1.4;
   transition: all 0.15s;
 }
+/* 图标尺寸显式兜底：icons.ts 的 svg() 不再带 width/height 属性（2026-10-13） */
+.caldav-btn svg { width: 14px; height: 14px; }
 
 .caldav-btn:hover {
   border-color: var(--caldav-accent);
@@ -1556,6 +1558,7 @@ input.caldav-input[type="time"]:hover::-webkit-calendar-picker-indicator {
   transition: background 0.15s, border-color 0.15s;
 }
 .caldav-cat-manage:hover { border-color: color-mix(in srgb, var(--ed-accent) 50%, var(--ed-border)); background: color-mix(in srgb, var(--ed-accent) 8%, var(--ed-card)); }
+.caldav-cat-manage svg { width: 13px; height: 13px; }
 .caldav-cat-multi {
   margin-left: auto;
   display: inline-flex;
@@ -1717,6 +1720,7 @@ input.caldav-input[type="time"]:hover::-webkit-calendar-picker-indicator {
 }
 .caldav-catmgr-btn:hover { color: var(--ed-accent); border-color: color-mix(in srgb, var(--ed-accent) 50%, var(--ed-border)); }
 .caldav-catmgr-btn:disabled { opacity: 0.35; cursor: default; }
+.caldav-catmgr-btn svg { width: 14px; height: 14px; }
 .caldav-catmgr-arrows { display: flex; flex-direction: column; gap: 2px; }
 .caldav-catmgr-arrows .caldav-catmgr-btn { width: 24px; height: 18px; }
 .caldav-catmgr-arrow-up svg { transform: rotate(180deg); }
@@ -3828,6 +3832,7 @@ input.caldav-input[type="time"]:hover::-webkit-calendar-picker-indicator {
   color: var(--caldav-text-2);
   cursor: pointer;
 }
+.caldav-reminder-x svg { width: 14px; height: 14px; }
 
 /* 透明底的 hover：用 currentColor 派生，明暗主题自动适配 */
 .caldav-reminder-x:hover,

@@ -5,9 +5,15 @@
  * 全被填成实心黑块，只有 line/polyline 不受影响。
  * 解法：用**内联 style** 强制 `fill:none`（内联样式 > element 选择器）。
  * stroke 仍保留为属性，便于各处 CSS 定制颜色（如 .is-open svg { stroke:#fff }）。
+ *
+ * ⚠️ 宿主坑 2（2026-10-13 从 Obsidian 侧同步）：**不要在 svg 上写 width/height 属性**。
+ * Obsidian 宿主的全局 svg 规则特异性高于插件的 `.xxx svg { width: Npx }`，
+ * 属性尺寸会赢、CSS 输 —— 表现是「CSS 里明明放了，界面上还是 14px」。
+ * 思源自己的 base.css 没这个坑，但两边实现保持一字不差才好对照，
+ * 故一并去掉。尺寸由各处 CSS 决定，本次给四个原先靠属性兜底的容器补了规则。
  */
 function svg(path: string, viewBox = "0 0 24 24", strokeWidth = 2): string {
-  return `<svg viewBox="${viewBox}" width="14" height="14" fill="none" stroke="currentColor" style="fill:none;stroke-width:${strokeWidth};stroke-linecap:round;stroke-linejoin:round">${path}</svg>`;
+  return `<svg viewBox="${viewBox}" fill="none" stroke="currentColor" style="fill:none;stroke-width:${strokeWidth};stroke-linecap:round;stroke-linejoin:round">${path}</svg>`;
 }
 
 export const icons = {
