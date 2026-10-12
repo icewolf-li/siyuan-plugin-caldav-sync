@@ -969,11 +969,16 @@ export default class CalDavPlugin extends Plugin {
       const enabled = new Set(this.store.settings.calendars.filter((c) => c.enabled).map((c) => c.url));
 
       const rows: { ms: number; line: string }[] = [];
+      // 逾期待办（开关开启时）：DUE 早于今天零点且未完成 —— 排在日记最前面，与范围内条目分开成小节
+      const overdueRows: { ms: number; line: string }[] = [];
+      const includeOverdue = !!this.store.settings.includeOverdueTodos;
+      const todayMidnight = parseLocalStamp(today + "T00:00:00").getTime();
       for (const it of this.store.getAll()) {
         if (it.deleted || it.dirty || !enabled.has(it.calendarUrl)) continue;
         if (it.kind === "todo" && it.percent === 100) continue;
         const occs =
           it.kind === "todo" ? todoDueOccurrences(it, startMs, endMs) : occurrencesInRange(it, startMs, endMs);
+        let inRange = false;
         for (const occ of occs) {
           if (!occ) continue;
           const ms = parseLocalStamp(occ).getTime();
@@ -981,12 +986,29 @@ export default class CalDavPlugin extends Plugin {
           const timed = !it.allDay && /T\d{1,2}:\d{2}/.test(occ);
           const mark = it.kind === "todo" ? "☑️" : "📅";
           rows.push({ ms, line: `- ${mark} ${timed ? occ.slice(11, 16) : "全天"} ${it.summary || "(无标题)"}` });
+          inRange = true;
+        }
+        // 逾期待办：仅当开关开启、且本条没落在范围内（避免「所有」范围重复计入）时，按 DUE 收集到最前面
+        if (includeOverdue && it.kind === "todo" && it.end && !inRange) {
+          const dueMs = parseLocalStamp(it.end).getTime();
+          if (Number.isFinite(dueMs) && dueMs < todayMidnight) {
+            const dueTimed = !it.allDay && /T\d{1,2}:\d{2}/.test(it.end);
+            const dueLabel = dueTimed ? it.end.slice(11, 16) : "全天";
+            overdueRows.push({
+              ms: dueMs,
+              line: `- ⏰ ${it.end.slice(0, 10)} ${dueLabel} ${it.summary || "(无标题)"}`
+            });
+          }
         }
       }
       rows.sort((a, b) => a.ms - b.ms);
-      if (!rows.length) return this.notify(`${span.label}没有日程或待办`);
+      overdueRows.sort((a, b) => a.ms - b.ms); // 逾期最久（DUE 最早）排最前
+      if (!rows.length && !overdueRows.length) return this.notify(`${span.label}没有日程或待办`);
 
-      const md = `## ${span.sectionTitle}\n${rows.map((r) => r.line).join("\n")}\n`;
+      const overdueMd = overdueRows.length
+        ? `### 逾期待办\n${overdueRows.map((r) => r.line).join("\n")}\n`
+        : "";
+      const md = `## ${span.sectionTitle}\n${overdueMd}${rows.map((r) => r.line).join("\n")}\n`;
       const docId = await this.resolveDailyNoteId(targetStamp);
       if (!docId) return this.notify("没有打开的笔记本，无法创建日记", "error");
 
@@ -1003,8 +1025,9 @@ export default class CalDavPlugin extends Plugin {
       if (ins?.code) return this.notify(`写入日记失败：${ins.msg || ins.code}`, "error");
 
       this.openDocAsActive(docId);
+      const total = rows.length + overdueRows.length;
       return this.notify(
-        `已${replaced ? "更新" : "写入"}${targetLabel}的日记「${span.sectionTitle}」${rows.length} 条`
+        `已${replaced ? "更新" : "写入"}${targetLabel}的日记「${span.sectionTitle}」${total} 条`
       );
     } catch (e) {
       // 任何异常都要有反馈：静默失败会让用户以为没执行而重复点击

@@ -83,7 +83,7 @@ assert.ok(md.includes("测试条目 7"), "今天的日程应写入");
 assert.ok(/全天 测试条目 4/.test(md), "全天条目应标注「全天」而不是空时间");
 
 // 干扰项一律不得出现
-for (const bad of ["昨天的会议", "逾期待办", "跨日待办", "测试条目 5", "无截止任务", "仅开始时间任务"]) {
+for (const bad of ["昨天的会议", "逾期待办", "本周待办", "跨日待办", "测试条目 5", "无截止任务", "仅开始时间任务"]) {
   assert.ok(!md.includes(bad), `「${bad}」不属于今天，不应写入日记`);
 }
 
@@ -167,8 +167,8 @@ assert.ok(
   `本周的小节标题要带区间，实际：${String(insW.body.data).split("\n")[0]}`
 );
 assert.ok(msgW.includes("今天"), "提示应说明写到了哪一篇日记");
-// 本周应把「昨天 / 前天」里仍落在本周的条目也收进来（逾期待办按到期日）
-assert.ok(String(insW.body.data).includes("逾期待办"), "本周范围内应包含落在本周的逾期未完成待办");
+// 本周应把本周内到期的待办收进来（待办按到期日归属）：用「本周一+3 天」样本，周一~周日运行都稳
+assert.ok(String(insW.body.data).includes("本周待办"), "本周范围内应包含落在本周的待办（按到期日）");
 
 // ---- 本周 + 写到周一的日记 ----
 calls.length = 0;
@@ -205,6 +205,41 @@ assert.ok(
   !calls.some((c) => c.url === "/api/filetree/createDocWithMd" && String(c.body.path || "").includes("1900")),
   "绝不能去新建 1900 年的日记"
 );
+
+/* ============================================================
+ * 「包含逾期待办」开关（2026-10-12 新增）
+ * ============================================================ */
+// 默认关闭：逾期待办（seed-11，前天到期）不应出现在「当日」日记
+plugin.store.settings.includeOverdueTodos = false;
+docRows = [{ id: "doc-today", content: today, hpath: `/${today}` }];
+existingChildren = [];
+calls.length = 0;
+const msgOff = await plugin.insertTodayToDiary("day");
+const insOff = calls.find((c) => c.url === "/api/block/insertBlock");
+assert.ok(insOff, "当日范围应写入日记");
+assert.ok(!String(insOff.body.data).includes("逾期待办"), "开关关闭时逾期任务不应写入当日日记");
+assert.ok(!String(insOff.body.data).includes("### 逾期待办"), "开关关闭时不应出现「逾期待办」小节");
+
+// 开启开关：逾期任务应排在最前面的「### 逾期待办」小节
+plugin.store.settings.includeOverdueTodos = true;
+calls.length = 0;
+const msgOn = await plugin.insertTodayToDiary("day");
+const insOn = calls.find((c) => c.url === "/api/block/insertBlock");
+assert.ok(insOn, "开启开关后当日范围应写入日记");
+const mdOn = String(insOn.body.data);
+assert.ok(mdOn.includes("### 逾期待办"), "开启开关应出现「逾期待办」小节");
+assert.ok(mdOn.includes("逾期待办"), "开启开关应写入逾期任务条目");
+// 逾期小节必须排在范围内条目之前
+const idxOverdue = mdOn.indexOf("### 逾期待办");
+const idxInRange = Math.min(
+  mdOn.indexOf("- 📅") >= 0 ? mdOn.indexOf("- 📅") : Infinity,
+  mdOn.indexOf("- ☑️") >= 0 ? mdOn.indexOf("- ☑️") : Infinity
+);
+assert.ok(idxOverdue >= 0 && idxOverdue < idxInRange, "逾期末节必须排在范围内条目之前");
+// 开关只认「未完成的逾期」：已完成待办（seed-5）即便过去也不应进逾期末节
+assert.ok(!mdOn.includes("测试条目 5"), "已完成的待办不应作为逾期待办写入");
+// 还原默认值，避免影响后续（后续无插入调用，仅保险）
+plugin.store.settings.includeOverdueTodos = false;
 
 /* ---------- 纯计算契约（复刻 + 源码防漂移） ----------
  * 源文件是 TS 且依赖 core/date，Node 直接 require 不了，故复刻实现；

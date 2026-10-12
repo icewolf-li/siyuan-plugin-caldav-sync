@@ -161,6 +161,7 @@ export function openSettingsDialog(ctx: PanelCtx): Promise<void> {
       s.futureDays = Math.max(30, +$("input[data-s='future']").value || 370);
       const wasRemindOn = s.enableReminders;
       s.enableReminders = ($("input[data-s='reminders']") as HTMLInputElement).checked;
+      s.includeOverdueTodos = ($("input[data-s='includeOverdue']") as HTMLInputElement).checked;
       // 勾选的日历
       el.querySelectorAll<HTMLElement>(".caldav-set-cal").forEach((row) => {
         const c = s.calendars[+row.dataset.idx!];
@@ -300,6 +301,14 @@ function settingsHtml(s: PanelCtx["store"]["settings"], mobile: boolean): string
       不提供授权窗口（不会弹窗，内核默认放行），Windows 便携版思源还会因缺少开始菜单快捷方式
       被系统丢弃系统通知 —— 两者都属于已知限制，不影响应用内提醒卡片。
     </p>
+  </div>
+
+  <div class="caldav-section caldav-section--card">
+    <div class="caldav-section-title"><span class="caldav-section-icon">${icons.doc}</span>日记</div>
+    <label class="caldav-check-row">
+      <input type="checkbox" data-s="includeOverdue" ${s.includeOverdueTodos ? "checked" : ""}/>
+      <span>插入日记时包含逾期待办（默认只写当日 / 本周 / 本月范围内的条目，逾期任务不写）</span>
+    </label>
   </div>
 
 </div>

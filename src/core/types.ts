@@ -175,6 +175,15 @@ export interface CalSettings {
   categories?: CategoryDef[];
   /** 分类是否允许多选 */
   categoryMulti?: boolean;
+  /**
+   * 插入日记时是否把逾期待办也写入，并排在日记最前面。
+   *
+   * 逾期 = 待办的到期日（DUE）早于今天零点、且未完成（percent !== 100）。
+   * 默认 false —— 维持旧行为：只写落在当日 / 本周 / 本月范围内的条目。
+   * 开启后，范围之外的逾期待办（「所有」范围里本来就含的不会重复计入）
+   * 会在「日程与待办」小节最前面追加一个 `### 逾期待办` 子节。
+   */
+  includeOverdueTodos?: boolean;
 }
 
 /**
@@ -208,7 +217,8 @@ export const DEFAULT_SETTINGS: CalSettings = {
   showEventsInTaskView: false,
   showExpiredEventsInTaskView: false,
   categories: DEFAULT_CATEGORIES,
-  categoryMulti: false
+  categoryMulti: false,
+  includeOverdueTodos: false
 };
 
 export interface SyncState {

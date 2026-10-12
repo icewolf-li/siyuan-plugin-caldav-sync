@@ -566,11 +566,12 @@ function bindEvents(ctx: PanelCtx, dialog: Dialog, el: HTMLElement, it: CalItem,
     const raw = f(name).value;
     const cur = /^\d{2}:\d{2}$/.test(raw) ? raw : "09:00";
     const [ch, cm] = cur.split(":");
-    const hours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0"));
-    const minutes: string[] = [];
-    for (let m = 0; m < 60; m += 5) minutes.push(String(m).padStart(2, "0"));
-    if (!minutes.includes(cm)) minutes.push(cm); // 已有值不在 5 分钟刻度上时保留，避免一打开就被改掉
-    minutes.sort();
+    // 自然顺序：小时 00..23、分钟 00,05..55。未落在 5 分钟刻度上的已有值保留，避免一打开就被改掉
+    const hoursAll = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0"));
+    const minutesAll: string[] = [];
+    for (let m = 0; m < 60; m += 5) minutesAll.push(String(m).padStart(2, "0"));
+    if (!minutesAll.includes(cm)) minutesAll.push(cm);
+    minutesAll.sort();
     const col = (key: string, values: string[], active: string) =>
       `<div class="caldav-time-col" data-col="${key}">${values
         .map(
@@ -580,8 +581,18 @@ function bindEvents(ctx: PanelCtx, dialog: Dialog, el: HTMLElement, it: CalItem,
             }" data-time-val="${v}">${v}</button>`
         )
         .join("")}</div>`;
-    pop.innerHTML = col("h", hours, ch) + col("m", minutes, cm);
-    pop.querySelector(".caldav-time-item.is-active")?.scrollIntoView?.({ block: "center" });
+    pop.innerHTML = col("h", hoursAll, ch) + col("m", minutesAll, cm);
+    // 选中项滚动到列的视口顶部：上方是更早的值（上滚可取）、下方是更晚的值（下滚可取）。
+    // 注意 a.offsetTop 是相对定位祖先（弹层）的偏移，必须减去列自身的 offsetTop 折算成「列内滚动量」，
+    // 否则会多算弹层的 padding 与列的横向偏移，导致滚动被钳到最大、选中块被顶到中下部甚至被上边框裁切。
+    const pos = () => {
+      pop.querySelectorAll<HTMLElement>(".caldav-time-col").forEach((c) => {
+        const a = c.querySelector<HTMLElement>(".caldav-time-item.is-active");
+        if (a) c.scrollTop = Math.max(0, a.offsetTop - c.offsetTop);
+      });
+    };
+    if (typeof requestAnimationFrame !== "undefined") requestAnimationFrame(pos);
+    else pos();
   }
 
   /** "YYYY-MM-DDTHH:mm" 加一小时，返回同格式（跨天会进位到次日） */

@@ -125,6 +125,14 @@ export function seedStore(plugin) {
     const d = new Date(today.getTime() - n * 86400000);
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   };
+  // 正向偏移（含未来）：用于构造「确定落在本周」的样本，避免测试对运行星期产生依赖
+  const shift = (n) => {
+    const d = new Date(today.getTime() + n * 86400000);
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  };
+  const dow = (today.getDay() + 6) % 7; // 周一=0，周三=2…
+  const monday = shift(-dow);
+  const midWeek = shift(-dow + 3); // 本周内确定的一天（周一~周日任意天运行都落在 [周一,周日]）
   // 明确已经结束的过去事件：用于验证「当前时间以前的日程不显示」
   store.put(mk(10, { summary: "昨天的会议", start: `${dayBack(1)}T09:00:00`, end: `${dayBack(1)}T10:00:00` }));
   // 日期在窗口内、但当天早已结束的日程：这才是「按当前时刻判断」与「只按日期判断」的分水岭
@@ -140,6 +148,19 @@ export function seedStore(plugin) {
       priority: 1,
       start: `${dayBack(2)}T09:00:00`,
       end: `${dayBack(2)}T18:00:00`
+    })
+  );
+  // 本周内确定到期（midWeek）的待办：用于验证「本周」范围把周内到期待办收进来。
+  // 用「本周一 + 3 天」而非「前天」，避免周一/周二运行时样本越出本周导致测试误报。
+  store.put(
+    mk(13, {
+      summary: "本周待办",
+      kind: "todo",
+      percent: 0,
+      status: "NEEDS-ACTION",
+      priority: 3,
+      start: `${midWeek}T09:00:00`,
+      end: `${midWeek}T18:00:00`
     })
   );
 }
