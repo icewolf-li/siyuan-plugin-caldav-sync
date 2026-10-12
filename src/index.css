@@ -2189,7 +2189,9 @@ input.caldav-input[type="time"]:hover::-webkit-calendar-picker-indicator {
   background: color-mix(in srgb, var(--caldav-accent) 10%, transparent);
 }
 
-.caldav-title-action svg { width: 17px; height: 17px; }
+/* 粘贴识别日期的图标：20px。原 17px 在 30px 的按钮里显得过小、看不清，
+ * 与相邻输入框图标（15px）拉不开层级（2026-10-12 雄哥要求放大）。 */
+.caldav-title-action svg { width: 20px; height: 20px; }
 
 /* 日期时间行 */
 .caldav-datetime-row {
@@ -2255,7 +2257,10 @@ input.caldav-input[type="time"]:hover::-webkit-calendar-picker-indicator {
   color: var(--caldav-danger);
 }
 
-.caldav-input-clear svg { width: 14px; height: 14px; }
+/* 清除日期/时间的垃圾桶图标：18px。原 14px 在 28px 按钮里偏小，
+ * 且小于输入框内的日历/时钟图标（15px）—— 该清的按钮反而不显眼，
+ * 2026-10-12 雄哥要求放大。 */
+.caldav-input-clear svg { width: 18px; height: 18px; }
 
 .caldav-all-day-row {
   display: flex;
