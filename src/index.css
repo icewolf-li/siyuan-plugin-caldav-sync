@@ -1433,7 +1433,20 @@
 }
 textarea.caldav-input { resize: vertical; font-family: inherit; line-height: 1.5; }
 textarea.caldav-input.caldav-textarea { min-height: 120px; padding: 12px; }
-select.caldav-input { cursor: pointer; appearance: none; -webkit-appearance: none; color-scheme: light; }
+/* ⚠️ select 必须**显式给 height**，不能只靠 padding 撑。
+ * select 的固有高度由 option 行高决定，与 input 的文本行高不一致；
+ * 在 box-sizing: border-box 下若宿主再给它定 height，两者叠加会**裁字**。
+ * Obsidian 侧已因此被反馈过（2026-10-13 优先级下拉框「无」字显示不全），
+ * 两边实现保持一字不差，故一并补上。36px 与普通输入框对齐。
+ * 右侧 28px 给自绘 chevron 箭头留位。 */
+select.caldav-input {
+  height: 36px;
+  padding-right: 28px;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  color-scheme: light;
+}
 .b3-theme-dark select.caldav-input { color-scheme: dark; }
 /* 下拉弹出列表跟随主题变量（原为固定暖色浅底，现跟随思源深浅色） */
 select.caldav-input option {
