@@ -591,8 +591,11 @@ function bindEvents(ctx: PanelCtx, dialog: Dialog, el: HTMLElement, it: CalItem,
         if (a) c.scrollTop = Math.max(0, a.offsetTop - c.offsetTop);
       });
     };
-    if (typeof requestAnimationFrame !== "undefined") requestAnimationFrame(pos);
-    else pos();
+    // 与 Obsidian 侧保持一字不差：显式走 window.requestAnimationFrame，
+    // 避免绑到错误的 window 对象上（Obsidian 的 popout 是独立 window，
+    // 社区审核 0.4.10 报过这一条）。
+    if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(pos);
+    else window.setTimeout(pos, 0);
   }
 
   /** "YYYY-MM-DDTHH:mm" 加一小时，返回同格式（跨天会进位到次日） */
