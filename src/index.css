@@ -2282,9 +2282,32 @@ input.caldav-input[type="time"]:hover::-webkit-calendar-picker-indicator {
 .caldav-all-day-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  /* 与 Obsidian 侧一致：加「清除日期时间」按钮后不再用 space-between，
+     否则三个子元素被均铺、开关和按钮被拉开。 */
   gap: 12px;
 }
+/* 「清除日期时间」按钮：图标 + 文字（2026-10-13 雄哥要求，与 Obsidian 侧一致） */
+.caldav-all-day-clear {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--caldav-border);
+  border-radius: 8px;
+  background: var(--caldav-bg);
+  color: var(--caldav-text-2);
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.15s;
+}
+.caldav-all-day-clear:hover {
+  border-color: var(--caldav-danger);
+  color: var(--caldav-danger);
+  background: color-mix(in srgb, var(--caldav-danger) 8%, var(--caldav-bg));
+}
+.caldav-all-day-clear svg { width: 16px; height: 16px; }
 .caldav-all-day-switch {
   flex: 0 0 auto;
   border-bottom: none;
@@ -2301,6 +2324,8 @@ input.caldav-input[type="time"]:hover::-webkit-calendar-picker-indicator {
 .caldav-duration-row--inline {
   flex: 0 0 auto;
   padding: 0;
+  /* 与 Obsidian 侧一致：父级不再 space-between，显式推到行尾 */
+  margin-left: auto;
 }
 
 .caldav-duration-val {
