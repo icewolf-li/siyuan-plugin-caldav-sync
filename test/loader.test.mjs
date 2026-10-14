@@ -310,6 +310,97 @@ assert.strictEqual(cellsWithCross.length, 1, "跨日待办应只落在一天（�
 assert.ok(!cellsWithCross[0].classList.contains("is-today"), "跨日待办不应落在开始日（今天）");
 assert.ok(tabEl.querySelector(".cal-month-cell.is-today .cal-today-badge"), "今日单元格应有日期徽标");
 
+// ---- 月视图「放不下时悬停/点击展开浮层」（2026-10-14）----
+// 默认仍是截断（每格 3 条 + 「还有 N 项…」），浮层是唯一看到全部条目的途径。
+// ⚠️ 刻意不做格内滚动：格内滚动会劫持滚轮（26 格各滚各的，整个月视图推不动）。
+const todayCell = tabEl.querySelector(".cal-month-cell.is-today");
+const moreLine = todayCell?.querySelector(".cal-chip-more");
+assert.ok(moreLine, "条目超过 3 个的格子应渲染「还有 N 项…」提示");
+assert.ok(
+  /^还有 \d+ 项/.test((moreLine.textContent || "").trim()),
+  `提示文案应是「还有 N 项…」，实际：${(moreLine.textContent || "").trim()}`
+);
+assert.ok(
+  Number(todayCell.dataset.more || "0") > 0,
+  "格子应把「还差几条」记在 data-more 上（悬停/点击展开时据此判断要不要弹）"
+);
+// 默认状态下浮层不存在（必须显式触发，不能一上来就挡住月视图）
+assert.strictEqual(
+  document.querySelectorAll(".caldav-month-pop").length,
+  0,
+  "默认不应有浮层（否则会挡住月视图）"
+);
+// ⚠️ 浮层**只由悬停触发**（2026-10-14 雄哥取消「点击空白处弹出」）：
+// 单击会与「双击空白处新建」抢地盘，且再单击同一处既不会关、语义又别扭。
+// 先钉住这一点：单击（无论点空白还是点日期数字）都**不该**弹出浮层。
+todayCell.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+await settle(20);
+assert.strictEqual(
+  document.querySelectorAll(".caldav-month-pop").length,
+  0,
+  "单击单元格空白处不应弹出浮层（只认悬停；单击留给双击新建）"
+);
+const dayNumEl = todayCell.querySelector(".cal-month-daynum");
+if (dayNumEl) {
+  dayNumEl.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  await settle(20);
+  assert.strictEqual(
+    document.querySelectorAll(".caldav-month-pop").length,
+    0,
+    "单击日期数字也不应弹出浮层"
+  );
+}
+
+// 悬停够久的格子 → 浮层出现，且列出当天**全部**条目（不止 3 条）
+todayCell.dispatchEvent(new window.MouseEvent("mouseenter", { bubbles: true }));
+await settle(20);
+const pop = document.querySelector(".caldav-month-pop");
+assert.ok(pop, "悬停放不下的格子应弹出「该日全部条目」浮层");
+// 浮层里的条目数 = 格子上标注的「总数」（chip 数 + more 数）
+const popChips = pop.querySelectorAll(".cal-chip");
+assert.strictEqual(
+  popChips.length,
+  todayCell.querySelectorAll(".cal-chip").length + Number(todayCell.dataset.more || "0"),
+  "浮层应列出当天全部条目（格内 3 条 + 「还有 N 项」的那些）"
+);
+assert.ok(pop.querySelector(".caldav-month-pop-title"), "浮层应带日期标题");
+assert.ok(pop.querySelector(".cal-chip[data-open]"), "浮层里的条目应可点（进编辑器）");
+// Esc 关闭；重新悬停可再次打开
+document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+assert.strictEqual(document.querySelectorAll(".caldav-month-pop").length, 0, "按 Esc 应关闭浮层");
+todayCell.dispatchEvent(new window.MouseEvent("mouseenter", { bubbles: true }));
+await settle(20);
+assert.ok(document.querySelector(".caldav-month-pop"), "关闭后可再次悬停打开");
+// 点外部关闭：target 必须是**月视图容器之外**的元素。
+// ⚠️ 不能拿 .caldav-app 当外部目标 —— 它是月视图容器的祖先，落在它身上的
+//    点击语义上就是「点在月视图内」，按实现不该关浮层。
+const outside = document.createElement("div");
+document.body.appendChild(outside);
+outside.dispatchEvent(new window.MouseEvent("mousedown", { bubbles: true }));
+assert.strictEqual(document.querySelectorAll(".caldav-month-pop").length, 0, "点外部应关闭浮层");
+
+// 源码防漂移：浮层必须 position: fixed 且自带变量映射（挂在 body 上）
+const CSS_SRC_MONTH = fs.readFileSync(path.join(ROOT, "src", "index.css"), "utf8");
+const popBlock = (() => {
+  const i = CSS_SRC_MONTH.indexOf(".caldav-month-pop {");
+  assert.ok(i >= 0, "CSS 里找不到 .caldav-month-pop");
+  return CSS_SRC_MONTH.slice(i, i + 900);
+})();
+assert.ok(
+  /--caldav-bg:/.test(popBlock) && /--caldav-border:/.test(popBlock) && /--caldav-text:/.test(popBlock),
+  "浮层挂在 body 上拿不到 .caldav-root 的变量，必须自带 --caldav-* 映射"
+);
+assert.ok(
+  /position: fixed/.test(popBlock),
+  "浮层必须 position: fixed（挂 body 上按 absolute 会相对文档定位、跑到视口外）"
+);
+// 浮层列表自己滚动，头部固定
+const listStart = CSS_SRC_MONTH.indexOf(".caldav-month-pop-list {");
+assert.ok(listStart >= 0, "CSS 里找不到 .caldav-month-pop-list");
+const listBlock = CSS_SRC_MONTH.slice(listStart, listStart + 300);
+assert.ok(/overflow-y: auto/.test(listBlock), "浮层列表应可滚动（条目多时头部不跟着走）");
+assert.ok(/min-height: 0/.test(listBlock), "可滚动容器必须配 min-height: 0，否则撑破 flex 上限");
+
 // ---- 年视图 ----
 click(tabEl.querySelector('[data-view="year"]'));
 assert.ok(tabEl.querySelector(".cal-year"), "年视图应渲染");
@@ -988,12 +1079,184 @@ const savedAlarms = (plugin.store.get(alarmKey)?.alarms || []).map((a) => a.minu
 assert.deepStrictEqual(savedAlarms, expectAlarms, "保存应写入全部提醒（旧实现只留第一个）");
 assert.ok(!document.querySelector(".caldav-editor"), "保存成功后编辑弹窗应关闭");
 
+// ②' 回归钉死「保持区不能是整个视图容器」：指针从格子划到**同在月视图内的另一个格**上，
+// 也算「移开了触发格」→ 0.6 秒后应收起。若保持区误传 viewEl，这里会永远收不掉。
+// ⚠️ 必须**自己造**第二个超量格子，不能指望种子数据（实测种子里只有今天那一个 >3 条，
+//    `if (found)` 这种条件性断言等于没有断言 —— 正是「弱断言给 bug 发通行证」的坑）。
+{
+  const nd = new Date();
+  const pad = (n) => (n < 10 ? "0" + n : String(n));
+  const tomorrowStamp = `${nd.getFullYear()}-${pad(nd.getMonth() + 1)}-${pad(nd.getDate() + 1)}`;
+  for (let i = 0; i < 5; i++) {
+    plugin.store.put({
+      uid: `bulk-${i}@test`,
+      kind: "event",
+      calendarUrl: "http://127.0.0.1:5232/testuser/work/",
+      href: `http://127.0.0.1:5232/testuser/work/bulk-${i}.ics`,
+      etag: `"b${i}"`,
+      summary: `批量条目 ${i}`,
+      allDay: false,
+      start: `${tomorrowStamp}T0${i + 1}:00:00`,
+      end: `${tomorrowStamp}T0${i + 1}:30:00`,
+      dirty: false,
+      deleted: false
+    });
+  }
+  // ⚠️ 前面的用例已把视图切到「任务」视图（mainCtx.viewMode=task），
+  //    必须先切回月视图，否则下面的「格子」根本不存在（曾因此让本段变成假断言）。
+  plugin.mainCtx.viewMode = "month";
+  click(tabEl.querySelector('[data-view="month"]'));
+  await settle();
+  assert.ok(tabEl.querySelector(".cal-month-grid"), "前置：应能切回月视图");
+  // 用工具栏的「立即同步」触发重绘（store 变了要重绘才会重新分桶）
+  click(tabEl.querySelector('[data-action="sync-now"]'));
+  await settle();
+
+  // 「今天的格子」在这一段之前尚未取到 hoverCell 引用，用日期排除它
+  const todayStampStr = (() => {
+    const n = new Date();
+    const pad = (x) => (x < 10 ? "0" + x : String(x));
+    return `${n.getFullYear()}-${pad(n.getMonth() + 1)}-${pad(n.getDate())}`;
+  })();
+  const bulkCell = [...tabEl.querySelectorAll(".cal-month-cell")].find(
+    (c) => c.dataset.day !== todayStampStr && Number(c.dataset.more || "0") > 0
+  );
+  assert.ok(bulkCell, "前置：应能造出第二个「>3 条」的格子（否则本段是假断言）");
+  const todayCellRef = tabEl.querySelector(`.cal-month-cell[data-day="${todayStampStr}"]`);
+  assert.ok(todayCellRef, "前置：应有今天的格子");
+
+  todayCellRef.dispatchEvent(new window.MouseEvent("mouseenter", { bubbles: true }));
+  await settle(20);
+  assert.ok(document.querySelector(".caldav-month-pop"), "前置：先重新展开浮层");
+  // 指针从触发格划到月视图内的另一个格子（**仍在 viewEl 内**）
+  todayCellRef.dispatchEvent(new window.MouseEvent("mouseleave", { bubbles: true }));
+  bulkCell.dispatchEvent(new window.MouseEvent("mouseover", { bubbles: true }));
+  await settle(15); // 300ms：明确小于 CLOSE_DELAY(600)，卡边界会抖动误判
+  assert.ok(
+    document.querySelector(".caldav-month-pop"),
+    "刚移到另一个格子时不该立刻消失（仍在延迟窗口内）"
+  );
+  await settle(40); // 800ms > CLOSE_DELAY(600ms)
+  assert.strictEqual(
+    document.querySelectorAll(".caldav-month-pop").length,
+    0,
+    "移到月视图内的另一个格子（仍在视图容器里）0.6 秒后也应收起 —— 保持区只能是触发格那一格"
+  );
+}
+
 // ---- 卸载：应主动关闭主窗口里已打开的「日历」自定义页签 ----
 // 思源在禁用/卸载插件时只摘掉自己接管的注册项（Dock / 顶栏 / 工具栏），不会关闭页签，
 // 于是主窗口会残留一个空白「日历」页签，且布局被写进 conf，重启后依然在。
 const openTabs = (reg.customModels || []).map((m) => m.tab);
 assert.ok(openTabs.length >= 1, "前置：主窗口应至少打开过一个日历自定义页签");
 assert.ok(openTabs.every((t) => !t.closed), "前置：页签在卸载前应处于打开状态");
+
+// 悬停浮层的收起规则（2026-10-14 雄哥第三次明确，替代前两轮被否定的做法）：
+//   ① 只有条目数 > 3 的格子才出浮层；
+//   ② 指针移出格子且不在浮层上 → 0.6 秒后消失；
+//   ③ 指针移入浮层后又移出 → 0.6 秒后消失；
+//   ④ 指针停在浮层上 → 一直保留，直到点某个条目（进编辑器时随之关闭）。
+// ⚠️ 关键：保持区只能是「触发的那一个格子」，传整个视图容器会导致永远收不掉。
+const POP_SRC = fs.readFileSync(path.join(ROOT, "src", "ui", "month-day-popup.ts"), "utf8");
+const MONTH_SRC = fs.readFileSync(path.join(ROOT, "src", "ui", "view-month.ts"), "utf8");
+
+// ⚠️ 本段跑在文件末尾：前面的用例已把视图切走，先切回月视图再验浮层规则
+click(tabEl.querySelector('[data-view="month"]'));
+assert.ok(tabEl.querySelector(".cal-month-grid"), "前置：应能切回月视图");
+
+// ① 只有 > 3 条的格子才出浮层
+const smallCells = [...tabEl.querySelectorAll(".cal-month-cell")].filter(
+  (c) => Number(c.dataset.more || "0") === 0
+);
+assert.ok(smallCells.length > 0, "前置：应有放得下的格子");
+smallCells[0].dispatchEvent(new window.MouseEvent("mouseenter", { bubbles: true }));
+await settle(20);
+assert.strictEqual(
+  document.querySelectorAll(".caldav-month-pop").length,
+  0,
+  "条目数 ≤ 3 的格子不应出浮层"
+);
+
+const hoverCell = tabEl.querySelector(".cal-month-cell.is-today");
+assert.ok(Number(hoverCell.dataset.more || "0") > 0, "前置：今天应放不下（>3 条）");
+hoverCell.dispatchEvent(new window.MouseEvent("mouseenter", { bubbles: true }));
+await settle(20);
+const hoverPop = document.querySelector(".caldav-month-pop");
+assert.ok(hoverPop, "条目数 > 3 的格子悬停应出浮层");
+
+// ② 移出格子、且不在浮层上 → 0.6 秒后消失（先确认延迟窗口内还在）
+hoverCell.dispatchEvent(new window.MouseEvent("mouseleave", { bubbles: true }));
+const elsewhere = document.createElement("div");
+document.body.appendChild(elsewhere);
+elsewhere.dispatchEvent(new window.MouseEvent("mouseover", { bubbles: true }));
+await settle(15); // 300ms：明确小于 CLOSE_DELAY(600)，卡边界会抖动误判
+assert.ok(
+  document.querySelector(".caldav-month-pop"),
+  "移出后 延迟窗口内浮层不该立刻消失（要给指针划向浮层的时间）"
+);
+await settle(40); // 800ms > CLOSE_DELAY(600ms)
+assert.strictEqual(
+  document.querySelectorAll(".caldav-month-pop").length,
+  0,
+  "指针移出格子且不在浮层上，0.6 秒后浮层应消失"
+);
+
+// ③ 移入浮层后又移出 → 0.6 秒后消失；④ 停在浮层上则一直保留
+hoverCell.dispatchEvent(new window.MouseEvent("mouseenter", { bubbles: true }));
+await settle(20);
+const pop2 = document.querySelector(".caldav-month-pop");
+assert.ok(pop2, "再次悬停应重新出浮层");
+pop2.dispatchEvent(new window.MouseEvent("mouseover", { bubbles: true }));
+await settle(15); // 300ms：明确小于 CLOSE_DELAY(600)
+assert.ok(document.querySelector(".caldav-month-pop"), "指针在浮层上时，延迟窗口内不该消失");
+await settle(30);
+assert.ok(
+  document.querySelector(".caldav-month-pop"),
+  "指针一直停在浮层上时浮层应一直保留（不能自动消失）"
+);
+// 移出浮层 → 0.6 秒后消失
+pop2.dispatchEvent(new window.MouseEvent("mouseenter", { bubbles: true })); // 先确保在范围内
+elsewhere.dispatchEvent(new window.MouseEvent("mouseover", { bubbles: true }));
+await settle(15); // 300ms：明确小于 CLOSE_DELAY(600)
+assert.ok(document.querySelector(".caldav-month-pop"), "刚移出浮层时不该立刻消失");
+await settle(40); // 800ms > CLOSE_DELAY(600ms)
+assert.strictEqual(
+  document.querySelectorAll(".caldav-month-pop").length,
+  0,
+  "移出浮层后 0.6 秒，浮层应消失"
+);
+
+// 点条目 → 进编辑器且浮层消失（雄哥指定的最后一条规则）
+hoverCell.dispatchEvent(new window.MouseEvent("mouseenter", { bubbles: true }));
+await settle(20);
+const pop3 = document.querySelector(".caldav-month-pop");
+const firstChip = pop3.querySelector(".cal-chip[data-open]");
+assert.ok(firstChip, "浮层内应有可点条目");
+firstChip.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+assert.strictEqual(
+  document.querySelectorAll(".caldav-month-pop").length,
+  0,
+  "点某个条目后浮层应消失"
+);
+assert.ok(document.querySelector(".caldav-editor"), "点条目应打开编辑弹窗");
+
+// 源码防漂移：定位间隙必须 0；保持区必须是「那一个格子」而非视图容器；延迟 0.6 秒
+assert.ok(/const GAP = 0;/.test(POP_SRC), "浮层与格子的间隙必须是 0（紧挨），GAP 稍大就像「浮在半空」");
+assert.ok(
+  /const CLOSE_DELAY = 600;/.test(POP_SRC),
+  "浮层收起延迟必须是 600ms（雄哥指定 0.6 秒）"
+);
+assert.ok(
+  /hoverZone = cell \|\| null/.test(POP_SRC),
+  "保持区必须取「触发的那一个格子」—— 传视图容器会导致浮层永远收不掉"
+);
+assert.ok(
+  /openMonthDayPopup\(ctx, day, list, cell, \(\) => renderMonthView\(args\), cell, viewEl\)/.test(
+    MONTH_SRC
+  ),
+  "调用时必须把格子（cell）同时作为锚点与保持区，viewEl 只作为「点不关」范围"
+);
+
 plugin.onunload();
 assert.ok(openTabs.every((t) => t.closed), "卸载插件时应关闭所有残留的「日历」页签");
 assert.ok(
@@ -1137,4 +1400,6 @@ assert.ok(
   builtJs.includes("1.5 1.5 21 21"),
   "Dock 图标应使用按图形收紧的 viewBox「1.5 1.5 21 21」（退回 0 0 24 24 会让图形四周留白、视觉变小）"
 );
+
+
 console.log("[loader] 模拟思源加载链路全部通过（Dock 工具行三操作点 + 下拉 + 年视图 + 分段切换 + 筛选面板 + 编辑弹窗）");

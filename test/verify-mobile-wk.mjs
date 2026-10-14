@@ -34,7 +34,7 @@ const allDayCells = DAYS.map((d) => {
 }).join("");
 const cols = DAYS.map((d) => {
   const inner = d === "2026-09-16"
-    ? `<div class="cal-wk-block cal-wk-block-todo is-done" data-open="ev1" style="--cal-color:#3b82f6;top:${((9 * 60) / 1440) * 100}%;height:${((60) / 1440) * 100}%">
+    ? `<div class="cal-wk-block cal-wk-block-todo is-done wk-h-s" data-open="ev1" style="--cal-color:#3b82f6;top:${((9 * 60) / 1440) * 100}%;height:${((60) / 1440) * 100}%">
          <div class="cal-wk-block-head"><button class="cal-chip-check" data-toggle="ev1">✓</button><div class="cal-wk-block-title">晨会</div></div>
          <div class="cal-wk-block-time">09:00</div>
        </div>`

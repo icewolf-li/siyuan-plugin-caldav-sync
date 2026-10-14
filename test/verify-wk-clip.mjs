@@ -30,10 +30,10 @@ const hours = [];
 for (let h = 0; h < 24; h++) hours.push(`<div class="cal-wk-hour" style="height:44px"><span>${String(h).padStart(2, "0")}:00</span></div>`);
 const allDayCells = DAYS.map(() => `<div class="cal-wk-allday-cell" data-day="x"></div>`).join("");
 
-// 长标题 + 地点，复刻 view-week.ts 的产物结构
+// 长标题 + 地点，复刻 view-week.ts 的产物结构（60 分钟 = 44px → wk-h-s 档，隐藏独立地点行）
 const longTitle = "联通大厦季度预算复审与项目组全员对齐会议";
 const loc = "太湖办公大楼";
-const block = `<div class="cal-wk-block cal-wk-block-todo" data-open="ev1" style="--cal-color:#d9534f;top:${((9 * 60) / 1440) * 100}%;height:${((60) / 1440) * 100}%">
+const block = `<div class="cal-wk-block cal-wk-block-todo wk-h-s" data-open="ev1" style="--cal-color:#d9534f;top:${((9 * 60) / 1440) * 100}%;height:${((60) / 1440) * 100}%">
   <div class="cal-wk-block-head"><button class="cal-chip-check" data-toggle="ev1">✓</button><div class="cal-wk-block-title">${longTitle}<span class="cal-wk-block-loc-inline">📍 ${loc}</span></div></div>
   <div class="cal-wk-block-time">09:00</div>
   <div class="cal-wk-block-loc">📍 ${loc}</div>

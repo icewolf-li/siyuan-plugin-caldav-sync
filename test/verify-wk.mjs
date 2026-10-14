@@ -36,12 +36,12 @@ const allDayCells = DAYS.map((d) => {
   return `<div class="cal-wk-allday-cell" data-day="${d}">${chips}</div>`;
 }).join("");
 
-// 时间网格：周三放一个 09:00 事件
+// 时间网格：周三放一个 09:00–10:00 事件（60 分钟 = 44px → wk-h-s 档，只显示标题+时间）
 const cols = DAYS.map((d) => {
   const inner = d === "2026-09-16"
-    ? `<div class="cal-wk-block" data-open="ev1" style="--cal-color:#3b82f6;top:${((9 * 60) / 1440) * 100}%;height:${((60) / 1440) * 100}%">
+    ? `<div class="cal-wk-block wk-h-s" data-open="ev1" style="--cal-color:#3b82f6;top:${((9 * 60) / 1440) * 100}%;height:${((60) / 1440) * 100}%">
+         <div class="cal-wk-block-head"><div class="cal-wk-block-title">晨会</div></div>
          <div class="cal-wk-block-time">09:00</div>
-         <div class="cal-wk-block-title">晨会</div>
        </div>`
     : "";
   return `<div class="cal-wk-col" data-day="${d}">${inner}</div>`;

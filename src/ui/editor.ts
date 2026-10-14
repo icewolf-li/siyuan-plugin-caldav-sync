@@ -370,6 +370,23 @@ function editorHtml(
     </div>
 
     <div class="caldav-section caldav-section--card">
+      <div class="caldav-section-title"><span class="caldav-section-icon">${icons.bell}</span>提醒设置</div>
+      <div class="caldav-alarm-list" data-alarm-list>${alarmRows}</div>
+      <div class="caldav-alarm-empty" data-alarm-empty ${alarmRows ? "hidden" : ""}>未设置提醒时间（到点时不会提醒）</div>
+      <div class="caldav-alarm-actions">
+        <button type="button" class="caldav-add-btn" data-action="add-alarm">${icons.plus} 添加提醒时间</button>
+        <button type="button" class="caldav-add-btn" data-action="add-preset">${icons.layers} 添加预设</button>
+        <div class="caldav-alarm-presets" data-alarm-presets hidden>
+          <div class="caldav-alarm-presets-hint">常用组合，点一下整组加入</div>
+          ${ALARM_PRESETS.map(
+            (p, i) =>
+              `<button type="button" class="caldav-alarm-preset" data-preset="${i}">${escape(p.label)}<span>加 ${p.values.length} 个</span></button>`
+          ).join("")}
+        </div>
+      </div>
+    </div>
+
+    <div class="caldav-section caldav-section--card">
       <div class="caldav-section-title"><span class="caldav-section-icon">${icons.repeat}</span>重复设置</div>
       <button type="button" class="caldav-row-btn" data-action="toggle-repeat-detail">
         <span class="caldav-row-btn-text">${repeatSummary(r)}</span>
@@ -404,23 +421,6 @@ function editorHtml(
           </select>
           <input class="caldav-input caldav-num" data-f="count" type="number" min="1" value="${r?.count || 10}" style="display:${r?.count ? "" : "none"}"/>
           <input class="caldav-input" data-f="until" type="date" value="${r?.until ? r.until.slice(0, 10) : ""}" style="display:${r?.until ? "" : "none"}"/>
-        </div>
-      </div>
-    </div>
-
-    <div class="caldav-section caldav-section--card">
-      <div class="caldav-section-title"><span class="caldav-section-icon">${icons.bell}</span>自定义提醒时间</div>
-      <div class="caldav-alarm-list" data-alarm-list>${alarmRows}</div>
-      <div class="caldav-alarm-empty" data-alarm-empty ${alarmRows ? "hidden" : ""}>未设置提醒时间（到点时不会提醒）</div>
-      <div class="caldav-alarm-actions">
-        <button type="button" class="caldav-add-btn" data-action="add-alarm">${icons.plus} 添加提醒时间</button>
-        <button type="button" class="caldav-add-btn" data-action="add-preset">${icons.layers} 添加预设</button>
-        <div class="caldav-alarm-presets" data-alarm-presets hidden>
-          <div class="caldav-alarm-presets-hint">常用组合，点一下整组加入</div>
-          ${ALARM_PRESETS.map(
-            (p, i) =>
-              `<button type="button" class="caldav-alarm-preset" data-preset="${i}">${escape(p.label)}<span>加 ${p.values.length} 个</span></button>`
-          ).join("")}
         </div>
       </div>
     </div>
@@ -842,7 +842,7 @@ function bindEvents(ctx: PanelCtx, dialog: Dialog, el: HTMLElement, it: CalItem,
     applyParsed(p);
   });
 
-  // 自定义提醒时间：多行列表 + 常用组合预设
+  // 提醒设置：多行列表 + 常用组合预设
   wireAlarms(el, errEl);
 
   el.querySelector('[data-action="cancel"]')?.addEventListener("click", () => dialog.destroy());

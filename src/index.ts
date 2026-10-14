@@ -11,7 +11,7 @@ import { SyncEngine } from "@/core/sync";
 import { setSecretSeed } from "@/core/secret";
 import { setDirectFallbackToProxy } from "@/core/http";
 import { occurrencesInRange } from "@/core/ics";
-import { todayStamp, fmtDateCn, fmtTime, stampOfMs, parseLocalStamp } from "@/core/date";
+import { todayStamp, fmtDateCn, fmtTime, stampOfMs, parseLocalStamp, diffDays } from "@/core/date";
 import type { CalItem } from "@/core/types";
 import { todoDueOccurrences } from "@/ui/view-common";
 import { ReminderEngine } from "@/core/reminder";
@@ -22,6 +22,7 @@ import { openEditor } from "@/ui/editor";
 import { openSettingsDialog } from "@/ui/settings-dialog";
 import { askDiaryRange } from "@/ui/diary-range-dialog";
 import { diarySpanOf, spanContains, diaryTargetStamp, targetOptionsOf, type DiaryRange, type DiaryTarget } from "@/ui/diary-range";
+import { dailyNoteAttrName, diaryWhenLabel, renderDailyNotePath, sqlText, baseNameOf } from "@/ui/diary-note";
 import { showReminderToast, clearReminderToasts } from "@/ui/reminder-toast";
 import { newDialog } from "@/ui/dialog";
 
@@ -969,6 +970,12 @@ export default class CalDavPlugin extends Plugin {
       const enabled = new Set(this.store.settings.calendars.filter((c) => c.enabled).map((c) => c.url));
 
       const rows: { ms: number; line: string }[] = [];
+      // 跨日范围（本周/本月/所有）必须逐行带日期，否则一串 09:00 分不清是哪天；
+      // 当日范围全在同一天，只写时间更清爽。
+      // ⚠️ 判据是「区间天数 > 1」，**不能**写成 `toExclusive > from` ——
+      //    当日范围的 toExclusive 是明天，那样判会误判成跨日、给每行都加日期。
+      const spanDays = diffDays(span.toExclusive, span.from);
+      const crossDay = spanDays > 1;
       // 逾期待办（开关开启时）：DUE 早于今天零点且未完成 —— 排在日记最前面，与范围内条目分开成小节
       const overdueRows: { ms: number; line: string }[] = [];
       const includeOverdue = !!this.store.settings.includeOverdueTodos;
@@ -985,7 +992,8 @@ export default class CalDavPlugin extends Plugin {
           if (!Number.isFinite(ms) || !spanContains(span, ms)) continue; // 只收真正落在范围内的实例
           const timed = !it.allDay && /T\d{1,2}:\d{2}/.test(occ);
           const mark = it.kind === "todo" ? "☑️" : "📅";
-          rows.push({ ms, line: `- ${mark} ${timed ? occ.slice(11, 16) : "全天"} ${it.summary || "(无标题)"}` });
+          const when = diaryWhenLabel(occ, timed, crossDay);
+          rows.push({ ms, line: `- ${mark} ${when} ${it.summary || "(无标题)"}` });
           inRange = true;
         }
         // 逾期待办：仅当开关开启、且本条没落在范围内（避免「所有」范围重复计入）时，按 DUE 收集到最前面
@@ -1069,28 +1077,100 @@ export default class CalDavPlugin extends Plugin {
   }
 
   /**
-   * 定位某一天的日记文档：优先 hpath / 标题命中，找不到再新建。
+   * 定位某一天的日记文档；找不到就按思源的日记规则新建一篇。
    *
    * 不一定是「今天」—— 选「本周 + 周一」时这里收到的是周一那一天。
+   *
+   * ⚠️ 为什么不能靠「标题/路径里含这个日期」去猜（2026-10-14 修）：
+   * 用户报的现象是「插进去了，但不在 daily note 里」。根因是旧实现只做
+   * `content like '%日期%'` 这种模糊匹配，且**只取前 20 条**（`limit 20`）——
+   *  1. 命中的是「正文里提过这个日期的普通文档」，不是日记；
+   *  2. 日记若排在 20 条之外（工作空间文档多时很常见）就彻底找不到；
+   *  3. 找不到时在**第一个未关闭笔记本的根目录**建 `/日期`，
+   *     而用户真正的日记在笔记本设置配的 `dailyNoteSavePath`（如 `/日记/2026-10-14`），
+   *     于是内容进了另一篇文档 —— 用户打开 daily note 当然看不到。
+   *
+   * 现在三级定位，逐级收紧：
+   *  ① **日记专属属性** `custom-dailynote-yyyymmdd`（思源建日记时自动打，见 Issue #9807）
+   *     —— 唯一可靠判据，不会误伤普通文档，也不受行数限制；
+   *  ② **笔记本的日记保存路径**：读 `dailyNoteSavePath` 模板，渲染出该天的确切 hpath 再精确查；
+   *  ③ 都查不到才新建，且**必须建在 ② 渲染出来的路径上**（今天则直接用内核的
+   *     `createDailyNote`，让内核按自己的规则建并自动打属性）。
    */
   private async resolveDailyNoteId(day: string): Promise<string | null> {
-    const rows: any[] =
+    // ① 日记专属属性：最可靠，直接按属性名精确查
+    const byAttr: any[] =
       (await this.kernelData("/api/query/sql", {
-        stmt: `select id, content, hpath from blocks where type = 'd' and (content like '%${day}%' or hpath like '%${day}%') limit 20`
+        stmt: `select id from blocks where type = 'd' and id in (
+                 select block_id from attributes where name = '${sqlText(dailyNoteAttrName(day))}'
+               ) limit 1`
       })) || [];
-    const titleOf = (r: any) => String(r.content || "").trim();
-    const pathOf = (r: any) => String(r.hpath || "");
-    // 日记路径模板必然含日期，hpath 命中比「正文里提过这个日期」可信得多
-    const hit =
-      rows.find((r) => pathOf(r).includes(day) && titleOf(r) === day) ||
-      rows.find((r) => pathOf(r).includes(day)) ||
-      rows.find((r) => titleOf(r) === day);
-    if (hit?.id) return hit.id;
+    if (byAttr[0]?.id) return byAttr[0].id;
 
-    const notebooks: any[] = (await this.kernelData("/api/notebook/lsNotebooks", {}))?.notebooks || [];
-    const nb = notebooks.find((n) => !n.closed);
+    // ② 按笔记本设置里的「日记保存路径」模板定位
+    const nb = await this.dailyNoteNotebook();
+    const hPath = nb?.dailyNoteSavePath ? renderDailyNotePath(nb.dailyNoteSavePath, day) : "";
+    if (nb && hPath) {
+      const byPath: any[] =
+        (await this.kernelData("/api/query/sql", {
+          stmt: `select id from blocks where type = 'd' and hpath = '${sqlText(hPath)}' limit 1`
+        })) || [];
+      if (byPath[0]?.id) return byPath[0].id;
+
+      // ③ 建：今天走内核官方接口（自动按笔记本规则建 + 打日记属性）；
+      //    其它日期内核接口不支持，只能按同一路径手建，再补上日记属性。
+      if (day === todayStamp()) {
+        const created = await this.kernelData("/api/filetree/createDailyNote", { notebook: nb.id });
+        if (created) return String(created);
+      }
+      const id = await this.kernelData("/api/filetree/createDocWithMd", {
+        notebook: nb.id,
+        path: hPath,
+        markdown: ""
+      });
+      if (id) {
+        await this.kernelData("/api/attr/setBlockAttrs", {
+          id: String(id),
+          attrs: { [dailyNoteAttrName(day)]: day.replace(/-/g, "") }
+        });
+        return String(id);
+      }
+    }
+
+    // 兜底：没有可用模板（笔记本没配日记路径）时，退回「精确标题匹配 + 根目录新建」。
+    // 只认标题**完全等于**日期的文档，不再用 like 模糊匹配（那是旧实现的坑）。
+    const byTitle: any[] =
+      (await this.kernelData("/api/query/sql", {
+        stmt: `select id, content, hpath from blocks where type = 'd' and content = '${sqlText(day)}' limit 1`
+      })) || [];
+    if (byTitle[0]?.id) return byTitle[0].id;
     if (!nb) return null;
-    return (await this.kernelData("/api/filetree/createDocWithMd", { notebook: nb.id, path: "/" + day, markdown: "" })) || null;
+    return (
+      (await this.kernelData("/api/filetree/createDocWithMd", { notebook: nb.id, path: "/" + day, markdown: "" })) ||
+      null
+    );
+  }
+
+  /**
+   * 挑一个「能建日记」的笔记本，并带回它的日记保存路径模板。
+   *
+   * 优先选**配了日记路径**的笔记本（`dailyNoteSavePath` 非空且不为 `/`）——
+   * 只有这类笔记本建出来的日记才在用户预期的位置。全都��配时退回第一个未关闭的，
+   * 此时 `dailyNoteSavePath` 为空，调用方会走兜底分支。
+   */
+  private async dailyNoteNotebook(): Promise<{ id: string; dailyNoteSavePath?: string } | null> {
+    const notebooks: any[] = (await this.kernelData("/api/notebook/lsNotebooks", {}))?.notebooks || [];
+    const open = notebooks.filter((n) => !n.closed && n?.id);
+    if (!open.length) return null;
+    let fallback: { id: string; dailyNoteSavePath?: string } | null = null;
+    for (const n of open) {
+      const conf: any = (await this.kernelData("/api/notebook/getNotebookConf", { notebook: n.id })) || {};
+      const tpl = typeof conf.dailyNoteSavePath === "string" ? conf.dailyNoteSavePath.trim() : "";
+      const usable = tpl && tpl !== "/" ? tpl : "";
+      if (usable) return { id: n.id, dailyNoteSavePath: usable };
+      if (!fallback) fallback = { id: n.id };
+    }
+    return fallback;
   }
 
   /**

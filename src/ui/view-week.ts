@@ -9,6 +9,19 @@ const HOUR_H = 44; // 每小时像素
 // 顶部全天栏行高由 index.css 的 .cal-wk-allday-cells min/max-height 决定（44px），
 // DOM 里只写类名、不写内联高度，避免两处硬编码打架。
 
+// 文字行数分档阈值（像素高）：矮块少显示几行，避免内容被裁。
+// 必须与 index.css 里 .cal-wk-block.wk-h-* 的说明保持一致，改一处要改两处。
+const TIER_XS_MAX = 34; // < 34px（约 46 分钟以内）→ 只显示标题
+const TIER_S_MAX = 54; // < 54px（约 73 分钟以内）→ 标题 + 时间，再高才显示地点
+
+/** 按块的实际像素高度算出文字行数档位 class（空串 = 全显示） */
+function tierClassOf(heightPct: number): string {
+  const px = (heightPct / 100) * 24 * HOUR_H;
+  if (px < TIER_XS_MAX) return " wk-h-xs";
+  if (px < TIER_S_MAX) return " wk-h-s";
+  return "";
+}
+
 interface Block {
   it: import("../core/types").CalItem;
   occ: string;
@@ -89,13 +102,16 @@ export function renderWeekView({ ctx, viewEl, occurrences }: ViewArgs, days: num
         .map((b) => {
           const k = keyOfItem(b.it);
           const top = (b.startMin / 1440) * 100;
-          const height = Math.max(((b.endMin - b.startMin) / 1440) * 100, 4);
+          // 极短事件（不足 15 分钟）保底 15px 高，保证还能看见、点得到。
+          // ⚠️ 下限必须用绝对像素换算，不能写百分比：原来 Math.max(…, 4) 的 4% ≈ 42px ≈ 57 分钟，
+          // 会把所有 42 分钟以内的事件都撑到 42px —— 色块直接超出真实时段（与 padding 那 4px 同类问题）。
+          const height = Math.max(((b.endMin - b.startMin) / 1440) * 100, (15 / 1440) * 100);
           const startLabel = `${String(b.startMin / 60 | 0).padStart(2, "0")}:${String(b.startMin % 60).padStart(2, "0")}`;
           const done = b.it.kind === "todo" && b.it.percent === 100;
           const check = b.it.kind === "todo"
             ? `<button class="cal-chip-check" data-toggle="${k}" title="${done ? "标记未完成" : "标记完成"}">✓</button>`
             : "";
-          return `<div class="cal-wk-block ${b.it.kind === "todo" ? "cal-wk-block-todo" : ""} ${done ? "is-done" : ""}" data-open="${k}"
+          return `<div class="cal-wk-block ${b.it.kind === "todo" ? "cal-wk-block-todo" : ""} ${done ? "is-done" : ""}${tierClassOf(height)}" data-open="${k}"
             style="--cal-color:${calColorOf(ctx, b.it)};top:${top}%;height:${height}%">
             <div class="cal-wk-block-head">${check}<div class="cal-wk-block-title">${repeatMark(b.it)}${escape(b.it.summary || "(无标题)")}${b.it.location ? `<span class="cal-wk-block-loc-inline">📍 ${escape(b.it.location)}</span>` : ""}</div></div>
             <div class="cal-wk-block-time">${startLabel}</div>

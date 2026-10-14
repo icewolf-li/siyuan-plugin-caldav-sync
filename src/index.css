@@ -457,6 +457,104 @@
   color: var(--caldav-text-2);
   padding-left: 8px;
   cursor: pointer;
+  border-radius: 3px;
+}
+.cal-chip-more:hover {
+  color: var(--caldav-accent);
+  background: var(--caldav-bg-3);
+}
+
+/* ---- 月视图「某日全部条目」浮层 ----
+ * ⚠️ 挂在 body 上，祖先链里没有 `.caldav-root`，`--caldav-*` 全部取不到值
+ * → 必须在自身重新声明变量映射，否则边框/底色会退化成 currentColor、透明。
+ * 与 `.caldav-dock-cat-pop`、`.caldav-editor` 等 body 级弹层同一套做法。 */
+.caldav-month-pop {
+  --caldav-accent: var(--b3-theme-primary, #3575f0);
+  --caldav-bg: var(--b3-theme-background, #fff);
+  --caldav-bg-2: var(--b3-theme-background-light, #f6f8fa);
+  --caldav-bg-3: var(--b3-theme-surface, #eef1f5);
+  --caldav-border: var(--b3-border-color, #e4e7ed);
+  --caldav-text: var(--b3-theme-on-background, #1f2329);
+  --caldav-text-2: var(--b3-theme-on-surface, #646a73);
+  position: fixed;
+  z-index: 130;
+  min-width: 180px;
+  max-width: min(280px, calc(100vw - 16px));
+  max-height: min(60vh, 420px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--caldav-border);
+  border-radius: 8px;
+  background: var(--caldav-bg);
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.18);
+  font-size: 13px;
+  color: var(--caldav-text);
+  overflow: hidden;
+}
+
+.caldav-month-pop-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--caldav-border);
+  background: var(--caldav-bg-2);
+}
+.caldav-month-pop-title { font-weight: 600; }
+.caldav-month-pop-count { font-size: 11px; color: var(--caldav-text-2); }
+
+/* 列表自己滚动：条目多时浮层高度有上限，头部固定不跟着滚走 */
+.caldav-month-pop-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* 浮层里的 chip：样式与格子里一致，但选择器不能带 .caldav-root（这里不在其子树内） */
+.caldav-month-pop .cal-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  padding: 3px 6px 3px 8px;
+  line-height: 1.35;
+  font-size: 12px;
+  border-radius: 4px;
+  border-left: 3px solid var(--cal-color, #64748b);
+  background: color-mix(in srgb, var(--cal-color, #64748b) 12%, var(--caldav-bg));
+  color: var(--caldav-text);
+  cursor: pointer;
+}
+.caldav-month-pop .cal-chip:hover { filter: brightness(0.96); }
+.caldav-month-pop .cal-chip.is-done .cal-chip-title {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+.caldav-month-pop .cal-chip-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+}
+.caldav-month-pop .cal-chip-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.caldav-month-pop .cal-chip-time { font-size: 10.5px; color: var(--caldav-text-2); }
+.caldav-month-pop .cal-chip-check {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  line-height: 1;
+  font-size: 11px;
 }
 
 /* 月视图专用卡片：两行显示（标题 + 时间），标题超出直接裁切不显示省略号 */
@@ -690,9 +788,24 @@
   font-size: 11px;
   line-height: 1.4;
   z-index: 1;
+  /* ⚠️ 本文件无全局 border-box：height 百分比默认是「内容高」，加上上下各 2px padding
+     会让色块总高比声明的时段多 4px，底部越出结束时刻的小时线（观感上「色彩框超过时间段边框」）。
+     显式声明后 top/height 百分比含 padding，色块首尾严格贴住起止时刻。 */
+  box-sizing: border-box;
 }
 
 .cal-wk-block:hover { filter: brightness(0.96); z-index: 2; }
+
+/* ---- 高度分档：文字行数按块高自适应，不再每条都固定占三行 ----
+   view-week.ts 按块的实际像素高度打档位 class（阈值必须与那边一致）：
+     wk-h-xs  高 < 34px（约 46 分钟以内）→ 只留标题
+     wk-h-s   34 ≤ 高 < 54px（约 73 分钟以内）→ 标题 + 时间
+     无档位   高 ≥ 54px → 标题 + 时间 + 地点（原样）
+   矮块里把标题垂直居中，免得只露半行字。 */
+.cal-wk-block.wk-h-xs .cal-wk-block-time,
+.cal-wk-block.wk-h-xs .cal-wk-block-loc { display: none; }
+.cal-wk-block.wk-h-s .cal-wk-block-loc { display: none; }
+.cal-wk-block.wk-h-xs { display: flex; flex-direction: column; justify-content: center; }
 
 /* 标题行：圆圈（待办）+ 标题，与月视图第一行风格一致 */
 .cal-wk-block-head {
@@ -1871,7 +1984,7 @@ input.caldav-input[type="time"]:hover::-webkit-calendar-picker-indicator {
   color: #fff;
 }
 
-/* 自定义提醒时间：多行列表（每行一个提醒 + 行尾删除） */
+/* 提醒设置：多行列表（每行一个提醒 + 行尾删除） */
 .caldav-alarm-list {
   display: flex;
   flex-direction: column;
