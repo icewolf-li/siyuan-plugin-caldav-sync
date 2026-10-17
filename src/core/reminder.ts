@@ -92,7 +92,7 @@ export class ReminderEngine {
         const fireAt = anchorMs - a.minutesBefore * 60000;
         if (fireAt < now - GRACE_MS) continue; // 过期超过宽限期：不补，避免轰炸历史条目
         if (fireAt > now + HORIZON_MS) continue; // 太远：等 rescan 推进
-        const key = `${item.uid}|${item.recurId || ""}|${a.minutesBefore}|${anchorISO}`;
+        const key = `${encodeURIComponent(item.calendarUrl)}|${item.uid}|${item.recurId || ""}|${a.minutesBefore}|${anchorISO}`;
         if (this.fired.has(key)) continue; // 已提醒过（含刚补发过的），不重复
         out.push({ key, fireAt, item, anchorISO, alarmMin: a.minutesBefore });
       }

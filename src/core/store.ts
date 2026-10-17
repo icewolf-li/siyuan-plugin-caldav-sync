@@ -2,7 +2,7 @@
  * 本地存储与条目仓库：插件私有数据读写 + 内存索引 + 订阅
  */
 import type { CalItem, CalSettings, PersistData } from "./types";
-import { DEFAULT_SETTINGS, normalizeCalendarColors } from "./types";
+import { DEFAULT_SETTINGS, normalizeCalendarColors, configuredServers, serverForCalendar } from "./types";
 import {
   adoptKeyring,
   decryptSecretDeep,
@@ -35,6 +35,10 @@ export class CalStore {
   keyring = "";
   /** 磁盘上的原始密文：解密失败时用它回写，绝不把密文覆盖成空串 */
   private rawCipher = "";
+  private serverLocks = new Map<string, { raw: string; pending: boolean }>();
+  hasPendingUnlock(): boolean {
+    return this.pendingUnlock || [...this.serverLocks.values()].some((x) => x.pending);
+  }
   private listeners = new Set<() => void>();
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -43,7 +47,7 @@ export class CalStore {
   async load(): Promise<void> {
     const data = (await this.env.loadData()) as PersistData | undefined;
     if (data) {
-      this.settings = { ...JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), ...data.settings };
+      this.settings = { ...JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), ...JSON.parse(JSON.stringify(data.settings || {})) };
       // 老数据：单一日历色 → eventColor + todoColor（不改变现有观感，见 types.ts）
       normalizeCalendarColors(this.settings.calendars);
       this.items = new Map((data.items || []).map((it) => [keyOf(it), it]));
@@ -60,6 +64,43 @@ export class CalStore {
       this.persistSoon();
     });
     await this.unlockPassword();
+    if (!this.settings.servers && this.settings.serverUrl) {
+      this.settings.servers = configuredServers(this.settings);
+      for (const cal of this.settings.calendars) cal.serverId = "legacy";
+      if (this.secretBroken || this.pendingUnlock) {
+        this.serverLocks.set("legacy", { raw: this.rawCipher, pending: this.pendingUnlock });
+      }
+    }
+    await this.unlockServers();
+  }
+
+  private async unlockServers(): Promise<void> {
+    for (const server of this.settings.servers || []) {
+      const lock = this.serverLocks.get(server.id);
+      const raw = server.password || lock?.raw || "";
+      if (!isEncrypted(raw)) continue;
+      const r = await decryptSecretDeep(raw);
+      if (r.ok) {
+        server.password = r.value || "";
+        this.serverLocks.delete(server.id);
+      } else {
+        server.password = "";
+        this.serverLocks.set(server.id, { raw, pending: r.reason === "unavailable" });
+      }
+    }
+  }
+
+  serverCredentialsIssue(id: string): string | undefined {
+    const server = configuredServers(this.settings).find((s) => s.id === id);
+    if (!server) return "日历所属服务器不存在，请重新配置";
+    if (!server.serverUrl) return "未配置服务器地址";
+    if (!server.username) return "未填写用户名";
+    if (!server.password) {
+      const lock = this.serverLocks.get(id);
+      if (lock) return lock.pending ? "密码待解密，稍后重试" : "密码解不开，请重新输入密码";
+      return "未填写密码，请在设置中填写";
+    }
+    return undefined;
   }
 
   /**
@@ -105,14 +146,20 @@ export class CalStore {
 
   /** 密钥就绪后重试解密（例如设备标识迟到，或数据由另一台设备同步过来） */
   async retryUnlock(): Promise<void> {
-    if (!this.pendingUnlock) return;
-    await this.unlockPassword();
+    if (this.pendingUnlock) await this.unlockPassword();
+    await this.unlockServers();
     if (!this.pendingUnlock) this.notify();
   }
 
 
   /** 凭据是否可用（用于同步前检查与界面提示） */
   credentialsIssue(): string | undefined {
+    if (this.settings.servers) {
+      return this.settings.servers.map((s) => {
+        const issue = this.serverCredentialsIssue(s.id);
+        return issue ? `${s.name}: ${issue}` : undefined;
+      }).find(Boolean);
+    }
     if (this.pendingUnlock) return "密码待解密（密钥未就绪），稍后会自动重试";
     if (this.secretBroken) return "密码解不开（密文来自另一台设备或已换设备），请在设置中重新输入密码";
     if (this.settings.serverUrl && !this.settings.password) return "未填写密码，请在设置中填写";
@@ -129,16 +176,26 @@ export class CalStore {
       clearTimeout(this.saveTimer);
       this.saveTimer = null;
     }
-    const plain = this.settings.password || "";
+    // 加密是异步操作：固定本次快照，避免迁移/切换账户时把稍后新增的明文服务器写盘。
+    const settings = { ...this.settings, calendars: this.settings.calendars.map((c) => ({ ...c })),
+      servers: this.settings.servers?.map((s) => ({ ...s })) };
+    const plain = settings.password || "";
     // 内存里没有明文有两种完全不同的含义 ——
     //   a) 已解开密文、用户本来就没密码 → 存空；
     //   b) 还没解开（密钥未就绪 / 密钥不匹配）→ **必须原样写回 rawCipher**。
     // 曾经不区分，b 会把磁盘上的密文覆盖成空串，密文永久丢失（「总是丢密码」的放大器）。
     const locked = this.secretBroken || this.pendingUnlock;
-    const password = plain ? await encryptSecret(plain) : locked ? this.rawCipher : "";
+    const servers = settings.servers ? await Promise.all(settings.servers.map(async (s) => ({
+      ...s, password: s.password ? await encryptSecret(s.password) : this.serverLocks.get(s.id)?.raw || ""
+    }))) : undefined;
+    // 兼容字段只镜像当前第一个账户，移除配置后不能复活旧账户的密文。
+    const password = servers ? servers[0]?.password || "" : plain ? await encryptSecret(plain) : locked ? this.rawCipher : "";
     await this.env.saveData({
       keyring: getKeyring() || this.keyring,
-      settings: { ...this.settings, password },
+      settings: { ...settings, ...(servers ? {
+        servers, serverUrl: servers[0]?.serverUrl || "", username: servers[0]?.username || "",
+        calendarPath: servers[0]?.calendarPath || "", channel: servers[0]?.channel || "auto"
+      } : {}), password },
       items: Array.from(this.items.values()),
       sync: {
         lastSync: this.lastSync,
@@ -275,7 +332,7 @@ export class CalStore {
   }
 
   isConfigured(): boolean {
-    return !!this.settings.serverUrl && !!this.settings.username && this.settings.calendars.some((c) => c.enabled);
+    return this.settings.calendars.some((c) => c.enabled && !!serverForCalendar(this.settings, c)?.serverUrl);
   }
 
   /** 手动通知订阅者（数据已被外部流程修改后） */
@@ -290,6 +347,7 @@ export class CalStore {
 }
 
 export function keyOf(item: CalItem): string {
-  // 同一资源同一 UID 一条；重复实例覆盖用 recurId 区分
-  return item.recurId ? `${item.uid}|${item.recurId}|${item.kind}` : `${item.uid}|${item.kind}`;
+  // UID 仅在同一日历内唯一；多个服务器/日历的相同 UID 必须共存。
+  const identity = item.recurId ? `${item.uid}|${item.recurId}|${item.kind}` : `${item.uid}|${item.kind}`;
+  return `${encodeURIComponent(item.calendarUrl)}|${identity}`;
 }

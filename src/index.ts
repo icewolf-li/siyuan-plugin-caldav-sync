@@ -160,7 +160,7 @@ export default class CalDavPlugin extends Plugin {
     await this.store.load();
     // 设备标识若迟到（getConf 失败/慢），v2 旧密文会停在「待解密」。稍后补一次；
     // 即便仍解不开，也绝不会把磁盘上的密文覆盖成空串（见 CalStore.unlockPassword）。
-    if (this.store.pendingUnlock) {
+    if (this.store.hasPendingUnlock()) {
       setTimeout(() => void this.retrySecretUnlock(), 2500);
     }
     this.sync = new SyncEngine(this.store, () => this.store.settings.channel);
@@ -329,6 +329,7 @@ export default class CalDavPlugin extends Plugin {
       onSettings: () => this.openSetting(),
       viewMode: () => this.mainCtx.viewMode,
       onOpenEditor: (item) => openEditor(this.mainCtx, { item }),
+      onCreate: (kind) => openEditor(this.mainCtx, { kind }),
       onToggleDone: (item) => toggleTodoDone(this.mainCtx, item)
     });
     this.dockMount = { el: target, refresh: panel.refresh, destroy: panel.destroy };
@@ -645,7 +646,7 @@ export default class CalDavPlugin extends Plugin {
   /** v2 旧密文依赖设备标识；迟到时补算一次并重试解密（不影响 v3 密文） */
   private async retrySecretUnlock(): Promise<void> {
     try {
-      if (!this.store.pendingUnlock) return;
+      if (!this.store.hasPendingUnlock()) return;
       await this.ensureSecretSeed();
       await this.store.retryUnlock();
     } catch (e) {

@@ -19,7 +19,7 @@ import assert from "node:assert";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { spawn, execFileSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { setupBrowserDom, loadBuiltPlugin, seedStore, freeDebugPort } from "./helpers.mjs";
 
@@ -69,6 +69,16 @@ assert.ok(
   (editorHtml.match(/caldav-input-clear/g) || []).length >= 4,
   "开始/结束两行应各有日期与时间的清除按钮"
 );
+document.querySelector('.caldav-editor [data-action="cancel"]').click();
+await new Promise((r) => setTimeout(r, 40));
+click(tabEl.querySelector('[data-action="new-todo"]'));
+const todoHtml = document.querySelector(".caldav-editor").outerHTML;
+document.querySelector('.caldav-editor [data-action="cancel"]').click();
+await new Promise((r) => setTimeout(r, 40));
+plugin.openSetting();
+const settingsHtml = document.querySelector(".caldav-settings").outerHTML;
+const dockHtml = dockEl.outerHTML;
+plugin.onunload();
 
 /* ---------- 2. 还原原生构造器，找无头浏览器 ---------- */
 Object.assign(globalThis, NATIVE);
@@ -102,12 +112,13 @@ const pageHtml = `<!doctype html>
 <style>
   html,body{margin:0;padding:0;font-family:system-ui,"Microsoft YaHei",sans-serif}
   /* 真实 .b3-dialog__container 是纵向 flex，这里补齐以免布局与真机不一致 */
-  .b3-dialog__container{display:flex;flex-direction:column}
+  .b3-dialog__container{display:flex;flex-direction:column;position:relative}
+  .b3-dialog__close{position:absolute;top:10px;right:12px;width:16px;height:16px}
 </style></head>
 <body>
-<div class="b3-dialog b3-dialog--open">
+<div class="b3-dialog b3-dialog--open caldav-dialog">
   <div class="b3-dialog__scrim"></div>
-  <div class="b3-dialog__container caldav-mobile-dialog" style="width:100vw;height:100vh">
+  <div class="b3-dialog__container caldav-item-dialog caldav-mobile-dialog" style="width:100vw;height:100vh">
     <svg class="b3-dialog__close"></svg>
     <div class="b3-dialog__header"><div class="b3-dialog__title">新建日程</div></div>
     <div class="b3-dialog__body">${editorHtml}</div>
@@ -116,6 +127,19 @@ const pageHtml = `<!doctype html>
 </body></html>`;
 const pagePath = path.join(outDir, "editor.html");
 fs.writeFileSync(pagePath, pageHtml, "utf8");
+const todoPath = path.join(outDir, "todo.html");
+const settingsPath = path.join(outDir, "settings.html");
+const dockPath = path.join(outDir, "dock.html");
+fs.writeFileSync(todoPath, pageHtml.replace(editorHtml, todoHtml).replace("新建日程", "新建待办"));
+fs.writeFileSync(settingsPath, pageHtml.replace(editorHtml, settingsHtml).replace("新建日程", "CalDAV 同步设置"));
+fs.writeFileSync(dockPath, `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="${cssHref}"><style>html,body{margin:0;font-family:system-ui;width:100%;height:100%}.caldav-dock{height:100vh}</style>${dockHtml}`);
+const desktopHtml = pageHtml.replace("caldav-item-dialog caldav-mobile-dialog", "caldav-item-dialog")
+  .replace("width:100vw;height:100vh", "width:80vw;height:90vh")
+  .replace("</style>", ".b3-dialog{display:flex;align-items:center;justify-content:center;width:100vw;height:100vh}</style>");
+const desktopEventPath = path.join(outDir, "desktop-event.html");
+const desktopTodoPath = path.join(outDir, "desktop-todo.html");
+fs.writeFileSync(desktopEventPath, desktopHtml);
+fs.writeFileSync(desktopTodoPath, desktopHtml.replace(editorHtml, todoHtml).replace("新建日程", "新建待办"));
 
 /* ---------- 4. CDP ---------- */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -126,10 +150,10 @@ const proc = spawn(
     "--headless=new", "--disable-gpu", "--no-sandbox", "--hide-scrollbars",
     "--no-first-run", "--disable-extensions", "--disable-background-networking",
     `--remote-debugging-port=${PORT}`,
-    `--user-data-dir=${path.join(outDir, "profile")}`,
+    `--user-data-dir=${path.join(outDir, "profile-" + process.pid + "-" + Date.now())}`,
     "about:blank"
   ],
-  { stdio: "ignore" }
+  { stdio: "ignore", windowsHide: true }
 );
 
 let killed = false;
@@ -266,14 +290,96 @@ for (const w of [...NARROW, ...STRICT]) {
   report.push(`${w}px ✓ 控件宽 ${m.rows[0].widths}（卡片内容 ${m.cardInnerW}）`);
 }
 
+// 新设置页和侧栏在真实布局引擎下验证，并保留隔离截图便于审阅。
+const artifactDir = path.join(root, ".test-ui-artifacts");
+fs.mkdirSync(artifactDir, { recursive: true });
+for (const [name, file, widths] of [["todo", todoPath, [360, 390, 844]], ["settings", settingsPath, [360, 390, 640]], ["dock", dockPath, [200, 240]]]) {
+  for (const width of widths) {
+    await send("Emulation.setDeviceMetricsOverride", { width, height: 844, deviceScaleFactor: 1, mobile: width < 600 });
+    await send("Page.navigate", { url: "file:///" + file.replace(/\\/g, "/") });
+    await sleep(300);
+    const result = await send("Runtime.evaluate", { expression: `(() => {
+      const box = document.querySelector('.caldav-settings-form, .caldav-editor-form, .caldav-dock-create');
+      return { overflow: box.scrollWidth > box.clientWidth + 1, width: box.clientWidth, scrollWidth: box.scrollWidth,
+        outside: [...box.querySelectorAll('*')].filter(el => el.getBoundingClientRect().right > box.getBoundingClientRect().right + 1).slice(0, 8).map(el => ({ class: el.className, width: el.getBoundingClientRect().width })) };
+    })()`, returnByValue: true });
+    if (width === 390 || width === 240 || result.result.value.overflow) {
+      const screenshot = await send("Page.captureScreenshot", { format: "png" });
+      fs.writeFileSync(path.join(artifactDir, `${name}-${width}.png`), Buffer.from(screenshot.data, "base64"));
+    }
+    assert.equal(result.result.value.overflow, false, `${name} ${width}px 横向溢出：${JSON.stringify(result.result.value)}`);
+    if (name === "todo") {
+      const phone = await send("Runtime.evaluate", { expression: `(() => {
+        const form = document.querySelector('.caldav-editor-form');
+        const basic = document.querySelector('[data-panel="basic"]');
+        const note = document.querySelector('[data-panel="note"]');
+        form.scrollTop = form.scrollHeight;
+        return { stacked: note.getBoundingClientRect().top >= basic.getBoundingClientRect().bottom - 1,
+          reachable: note.querySelector('textarea').getBoundingClientRect().bottom <= form.getBoundingClientRect().bottom + 1,
+          visible: getComputedStyle(note).display !== 'none', scrolling: getComputedStyle(form).overflowY === 'auto' };
+      })()`, returnByValue: true });
+      assert.deepStrictEqual(phone.result.value, { stacked: true, reachable: true, visible: true, scrolling: true });
+    }
+    report.push(`${name} ${width}px ✓ 无横向溢出`);
+  }
+}
+// 桌面默认表单应一屏展示，而不只是隐藏滚动条。
+for (const [name, file] of [["event", desktopEventPath], ["todo", desktopTodoPath]]) {
+  for (const [width, height] of [[1024, 768], [1280, 720], [1366, 768], [1440, 900], [1920, 1080]]) {
+    await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
+    await send("Page.navigate", { url: "file:///" + file.replace(/\\/g, "/") });
+    await sleep(250);
+    const measured = await send("Runtime.evaluate", { expression: `(() => {
+      const container = document.querySelector('.caldav-item-dialog');
+      const form = document.querySelector('.caldav-editor-form');
+      const basic = document.querySelector('[data-panel="basic"]');
+      const note = document.querySelector('[data-panel="note"]');
+      const area = note.querySelector('textarea');
+      const footer = document.querySelector('.caldav-editor-foot');
+      const c = container.getBoundingClientRect(), b = basic.getBoundingClientRect(), n = note.getBoundingClientRect(), a = area.getBoundingClientRect();
+      const noteTop = n.top; basic.scrollTop = basic.scrollHeight;
+      return { marginLeft: c.left / innerWidth, marginRight: (innerWidth - c.right) / innerWidth,
+        sideBySide: n.left >= b.right - 1 && Math.abs(n.top - b.top) < 1,
+        overflow: form.scrollWidth > form.clientWidth + 1 || basic.scrollWidth > basic.clientWidth + 1 || note.scrollWidth > note.clientWidth + 1,
+        noteVisible: a.width > 200 && a.height >= 100 && a.height <= 220 && a.bottom <= footer.getBoundingClientRect().top + 1,
+        noScroll: basic.scrollHeight <= basic.clientHeight + 1 && note.scrollHeight <= note.clientHeight + 1,
+        sizes: { basic: [basic.clientHeight, basic.scrollHeight], note: [note.clientHeight, note.scrollHeight] },
+        independentScroll: Math.abs(note.getBoundingClientRect().top - noteTop) < 1 && form.scrollHeight <= form.clientHeight + 1,
+        footerVisible: footer.getBoundingClientRect().bottom <= c.bottom + 1,
+        dateRows: [...basic.querySelectorAll('.caldav-datetime-row')].every(row => row.scrollWidth <= row.clientWidth + 1) };
+    })()`, returnByValue: true });
+    const m = measured.result.value;
+    assert.ok(Math.abs(m.marginLeft - .1) < .01 && Math.abs(m.marginRight - .1) < .01, `${name} ${width}px 留白应约 10%`);
+    if (width === 1440 || !m.noScroll) {
+      await send("Runtime.evaluate", { expression: "document.querySelector('[data-panel=basic]').scrollTop = 0" });
+      const screenshot = await send("Page.captureScreenshot", { format: "png" });
+      fs.writeFileSync(path.join(artifactDir, `${name}-two-columns.png`), Buffer.from(screenshot.data, "base64"));
+    }
+    assert.ok(m.sideBySide && !m.overflow && m.noteVisible && m.noScroll && m.independentScroll && m.footerVisible && m.dateRows, `${name} ${width}x${height} 两栏布局异常：${JSON.stringify(m)}`);
+    report.push(`${name} ${width}x${height} ✓ 默认内容一屏展示 / 无滚动 / 固定页脚`);
+  }
+  // 手机或拖窄窗口时所有卡片纵向排列，允许滚动且保留备注。
+  await send("Runtime.evaluate", { expression: `document.querySelector('[data-f="description"]').value = '布局切换保留备注';` });
+  for (const [width, split] of [[900, false], [1280, true], [900, false]]) {
+    await send("Emulation.setDeviceMetricsOverride", { width, height: 1000, deviceScaleFactor: 1, mobile: false });
+    const result = await send("Runtime.evaluate", { expression: `(() => ({
+      basicVisible: getComputedStyle(document.querySelector('[data-panel="basic"]')).display !== 'none',
+      noteVisible: getComputedStyle(document.querySelector('[data-panel="note"]')).display !== 'none',
+      stacked: document.querySelector('[data-panel="note"]').getBoundingClientRect().top >= document.querySelector('[data-panel="basic"]').getBoundingClientRect().bottom - 1,
+      description: document.querySelector('[data-f="description"]').value
+    }))()`, returnByValue: true });
+    assert.deepStrictEqual(result.result.value, { basicVisible: true, noteVisible: true, stacked: !split, description: "布局切换保留备注" });
+  }
+  report.push(`${name} ✓ 窄屏纵向排列并保留备注`);
+}
 ws.close();
 cleanup();
-// 直接用原生 rd 清理（绕过 WorkBuddy 的 trash 二进制 —— 删除大目录时该二进制会超时卡死）
+// 仅删除已验证位于本仓库内的临时目录。
 try {
-  execFileSync(process.env.ComSpec || "cmd", ["/c", "rd", "/s", "/q", outDir], { stdio: "ignore" });
-} catch {
-  try { fs.rmSync(outDir, { recursive: true, force: true }); } catch { /* 临时目录，清理失败不影响结论 */ }
-}
+  const relative = path.relative(root, path.resolve(outDir));
+  assert.ok(relative === ".test-layout");
+  fs.rmSync(outDir, { recursive: true, force: true });
+} catch { /* 临时目录清理失败不影响验证 */ }
 
 for (const line of report) console.log("  ✓ " + line);
 console.log("[layout] 移动端日期时间行排版回归通过（360~430 一行收住，清除按钮未被顶出）");

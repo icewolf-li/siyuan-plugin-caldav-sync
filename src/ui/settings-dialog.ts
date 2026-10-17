@@ -4,8 +4,8 @@
 import { Dialog, showMessage } from "siyuan";
 import { newDialog } from "@/ui/dialog";
 import { isMobile } from "./device";
-import type { CalCalendar } from "../core/types";
-import { calEventColor, calTodoColor, normalizeCalendarColors } from "../core/types";
+import type { CalCalendar, CalServer } from "../core/types";
+import { calEventColor, calTodoColor, normalizeCalendarColors, configuredServers, creationCalendars } from "../core/types";
 import { testConnection, discoverCalendars, describeNetworkError } from "../core/caldav";
 import type { PanelCtx } from "./panel";
 import { escape } from "./view-common";
@@ -30,7 +30,14 @@ export function openSettingsDialog(ctx: PanelCtx): Promise<void> {
       resolve();
       return;
     }
-    const s = ctx.store.settings;
+    // 所有编辑、发现都在草稿中进行；取消不会改动正在同步的配置。
+    const s = JSON.parse(JSON.stringify(ctx.store.settings)) as PanelCtx["store"]["settings"];
+    s.servers = configuredServers(s);
+    const makeServer = (): CalServer => ({ id: "server-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), name: "新服务器", serverUrl: "", username: "", password: "", calendarPath: "", channel: "auto" });
+    if (!s.servers.length) s.servers.push(makeServer());
+    if (s.servers.length === 1) for (const cal of s.calendars) cal.serverId ||= s.servers[0].id;
+    let current = s.servers[0];
+    let discovering = false;
     // 移动端竖屏放不下 640px 定宽弹窗，改为占满视口
     const mobile = isMobile();
     const dialog = newDialog({
@@ -55,7 +62,72 @@ export function openSettingsDialog(ctx: PanelCtx): Promise<void> {
     enableDialogResize(dialog);
     const $ = (sel: string) => el.querySelector(sel) as HTMLInputElement;
     const msgEl = el.querySelector("[data-msg]") as HTMLElement;
-    renderCalChecks(el, s.calendars);
+    const readCalendars = () => {
+      el.querySelectorAll<HTMLElement>(".caldav-set-cal").forEach((row) => {
+        const c = s.calendars.find((c) => c.url === row.dataset.url);
+        if (!c) return;
+        c.enabled = row.querySelector<HTMLInputElement>("input[type='checkbox']")!.checked;
+        c.displayName = row.querySelector<HTMLInputElement>("[data-role='name']")!.value.trim() || c.displayName;
+        for (const role of ["eventColor", "todoColor"] as const) {
+          const input = row.querySelector<HTMLInputElement>(`[data-role='${role}']`);
+          if (input?.value) c[role] = input.value;
+        }
+      });
+    };
+    const readServer = () => {
+      current.name = $("[data-s='server-name']").value.trim() || "服务器";
+      current.serverUrl = $("[data-s='server']").value.trim();
+      current.username = $("[data-s='username']").value.trim();
+      current.password = $("[data-s='password']").value || current.password;
+      current.calendarPath = $("[data-s='path']").value.trim();
+      current.channel = $("[data-s='channel']").value as CalServer["channel"];
+      readCalendars();
+    };
+    const readDefaults = () => {
+      s.defaultEventCalendarUrl = $("[data-s='default-event']").value || undefined;
+      s.defaultTodoCalendarUrl = $("[data-s='default-todo']").value || undefined;
+    };
+    const renderDefaults = () => {
+      for (const kind of ["event", "todo"] as const) {
+        const select = $("[data-s='default-" + kind + "']") as unknown as HTMLSelectElement;
+        const preferred = kind === "event" ? s.defaultEventCalendarUrl : s.defaultTodoCalendarUrl;
+        select.innerHTML = `<option value="">自动选择兼容日历</option>` + creationCalendars(s, kind).map((c) =>
+          `<option value="${escape(c.url)}">${escape(s.servers!.find((x) => x.id === c.serverId)?.name || "服务器")} / ${escape(c.displayName)} · ${escape(c.url)}</option>`).join("");
+        select.value = preferred || "";
+        if (select.selectedIndex < 0) select.value = "";
+      }
+    };
+    const renderServer = () => {
+      $("[data-s='servers']").innerHTML = s.servers!.map((x) => `<option value="${escape(x.id)}">${escape(x.name)}</option>`).join("");
+      $("[data-s='servers']").value = current.id;
+      for (const [field, value] of Object.entries({ "server-name": current.name, server: current.serverUrl, username: current.username, password: current.password, path: current.calendarPath, channel: current.channel })) $("[data-s='" + field + "']").value = value;
+      renderCalChecks(el, s.calendars.filter((c) => c.serverId === current.id));
+      renderDefaults();
+      msgEl.textContent = "";
+      msgEl.classList.remove("is-ok", "is-err");
+      const issue = ctx.store.serverCredentialsIssue(current.id);
+      if (issue && /解不开|待解密/.test(issue)) { msgEl.textContent = issue; msgEl.classList.add("is-err"); }
+    };
+    renderServer();
+    el.querySelector("[data-s='servers']")!.addEventListener("change", () => {
+      readServer(); readDefaults();
+      current = s.servers!.find((x) => x.id === $("[data-s='servers']").value)!;
+      renderServer();
+    });
+    el.querySelector("[data-action='add-server']")!.addEventListener("click", () => {
+      readServer(); readDefaults(); current = makeServer(); s.servers!.push(current); renderServer();
+    });
+    el.querySelector("[data-action='remove-server']")!.addEventListener("click", () => {
+      if (discovering) return;
+      readDefaults();
+      s.calendars = s.calendars.filter((c) => c.serverId !== current.id);
+      s.servers = s.servers!.filter((x) => x.id !== current.id);
+      if (!s.servers.length) s.servers.push(makeServer());
+      current = s.servers[0]; renderServer();
+    });
+    el.querySelector("[data-cals]")!.addEventListener("change", () => {
+      readDefaults(); readCalendars(); renderDefaults();
+    });
 
     // 提醒自检：测试按钮 + 排程状态（「带提醒时间的条目」为 0 说明是数据侧没设提醒）
     const remindBtn = el.querySelector("[data-action='test-remind']") as HTMLButtonElement | null;
@@ -101,7 +173,7 @@ export function openSettingsDialog(ctx: PanelCtx): Promise<void> {
     el.querySelector("[data-action='test']")?.addEventListener("click", () => {
       const server = $("input[data-s='server']").value.trim();
       const username = $("input[data-s='username']").value.trim();
-      const password = $("input[data-s='password']").value;
+      const password = $("input[data-s='password']").value || current.password;
       const channel = $("select[data-s='channel']").value as any;
       if (!server) {
         msgEl.textContent = "服务器地址不能为空";
@@ -119,42 +191,59 @@ export function openSettingsDialog(ctx: PanelCtx): Promise<void> {
     });
 
     el.querySelector("[data-action='discover']")?.addEventListener("click", async () => {
+      if (discovering) return;
+      readServer(); readDefaults();
+      const target = current;
       const server = $("input[data-s='server']").value.trim();
       const username = $("input[data-s='username']").value.trim();
-      const password = $("input[data-s='password']").value;
+      const password = $("input[data-s='password']").value || current.password;
       const channel = $("select[data-s='channel']").value as any;
       const path = $("input[data-s='path']").value.trim();
       msgEl.textContent = "正在发现日历…";
       msgEl.classList.remove("is-ok", "is-err");
+      discovering = true;
       try {
+        if (!server) throw new Error("服务器地址不能为空");
         const r = await discoverCalendars(server, channel, { username, password }, path);
-        const existing = new Map(s.calendars.map((c) => [c.url, c]));
-        s.calendars = r.calendars.map(
-          (c) =>
-            existing.get(c.url) || { ...c, enabled: true }
-        );
-        renderCalChecks(el, s.calendars);
-        msgEl.textContent = `发现 ${r.calendars.length} 个日历，请勾选后保存`;
+        if (r.calendars.some((c) => s.calendars.some((old) => old.url === c.url && old.serverId !== target.id))) throw new Error("该日历路径已属于另一个服务器配置，请避免重复配置同一路径");
+        // 请求期间仍可修改当前日历名称/颜色，合并前先收下这些编辑。
+        if (current === target) readCalendars();
+        readDefaults();
+        const existing = new Map(s.calendars.filter((c) => c.serverId === target.id).map((c) => [c.url, c]));
+        s.calendars = s.calendars.filter((c) => c.serverId !== target.id).concat(r.calendars.map((c) => ({
+          ...c, ...existing.get(c.url), serverId: target.id,
+          supportsEvent: c.supportsEvent, supportsTodo: c.supportsTodo,
+          syncToken: existing.get(c.url)?.supportsEvent === c.supportsEvent && existing.get(c.url)?.supportsTodo === c.supportsTodo ? existing.get(c.url)?.syncToken : undefined
+        })));
+        if (current === target) renderCalChecks(el, s.calendars.filter((c) => c.serverId === target.id));
+        renderDefaults();
+        msgEl.textContent = `${target.name}：发现 ${r.calendars.length} 个日历，请勾选后保存`;
         msgEl.classList.add("is-ok");
       } catch (e: any) {
         msgEl.textContent = "发现失败: " + describeNetworkError(e, channel);
         msgEl.classList.add("is-err");
+      } finally {
+        discovering = false;
       }
     });
 
     el.querySelector("[data-action='save']")?.addEventListener("click", async () => {
-      s.serverUrl = $("input[data-s='server']").value.trim();
-      s.username = $("input[data-s='username']").value.trim();
+      if (discovering) { msgEl.textContent = "请等待日历发现完成后保存"; return; }
+      readServer(); readDefaults();
+      const first = s.servers![0];
+      s.serverUrl = first.serverUrl;
+      s.username = first.username;
+      s.password = first.password;
       // 密码框留空 = 保持原样。解密失败时输入框本就是空的，用户只想改别的字段
       // 却点保存 —— 若无条件用空值覆盖，密码就被抹掉了（这正是丢密码的直接原因之一）。
-      const pwInput = $("input[data-s='password']").value;
+      const pwInput = first.password;
       if (pwInput) {
         s.password = pwInput;
         ctx.store.secretBroken = false;
         ctx.store.pendingUnlock = false;
       }
-      s.calendarPath = $("input[data-s='path']").value.trim();
-      s.channel = $("select[data-s='channel']").value as any;
+      s.calendarPath = first.calendarPath;
+      s.channel = first.channel;
       s.syncIntervalMin = Math.max(0, +$("input[data-s='interval']").value || 0);
       s.conflict = $("select[data-s='conflict']").value as any;
       s.pastDays = Math.max(7, +$("input[data-s='past']").value || 90);
@@ -162,21 +251,12 @@ export function openSettingsDialog(ctx: PanelCtx): Promise<void> {
       const wasRemindOn = s.enableReminders;
       s.enableReminders = ($("input[data-s='reminders']") as HTMLInputElement).checked;
       s.includeOverdueTodos = ($("input[data-s='includeOverdue']") as HTMLInputElement).checked;
-      // 勾选的日历
-      el.querySelectorAll<HTMLElement>(".caldav-set-cal").forEach((row) => {
-        const c = s.calendars[+row.dataset.idx!];
-        c.enabled = (row.querySelector("input[type='checkbox']") as HTMLInputElement).checked;
-        const nameInput = row.querySelector("input[data-role='name']") as HTMLInputElement;
-        if (nameInput.value.trim()) c.displayName = nameInput.value.trim();
-        // 日程 / 待办各自的默认色（药丸即取色器）。没出药丸的一侧保持原值不动
-        const evInput = row.querySelector("input[data-role='eventColor']") as HTMLInputElement | null;
-        if (evInput?.value) c.eventColor = evInput.value;
-        const tdInput = row.querySelector("input[data-role='todoColor']") as HTMLInputElement | null;
-        if (tdInput?.value) c.todoColor = tdInput.value;
-      });
       // 补齐缺的一侧 + 把旧 color 镜像成 eventColor（旧版本端读同一份数据不会变灰）
       normalizeCalendarColors(s.calendars);
       s.defaultCalendarUrl = s.calendars.find((c) => c.enabled)?.url;
+      // 空白占位服务器不参与持久化。
+      s.servers = s.servers!.filter((x) => x.serverUrl || s.calendars.some((c) => c.serverId === x.id));
+      ctx.store.settings = s;
       await ctx.store.persist();
       ctx.sync.startAutoSync();
       dialog.destroy();
@@ -207,6 +287,16 @@ function settingsHtml(s: PanelCtx["store"]["settings"], mobile: boolean): string
 <div class="caldav-settings-form">
   <div class="caldav-section caldav-section--card">
     <div class="caldav-section-title"><span class="caldav-section-icon">${icons.server}</span>服务器</div>
+    <div class="caldav-server-controls">
+      <select class="caldav-input" data-s="servers" aria-label="服务器配置"></select>
+      <button class="caldav-foot-btn caldav-foot-btn--ghost" data-action="add-server" type="button">${icons.plus} 添加服务器</button>
+      <button class="caldav-foot-btn caldav-foot-btn--danger" data-action="remove-server" type="button">${icons.trash} 移除配置</button>
+    </div>
+    <p class="caldav-set-hint">每个服务器独立保存账号、通道和日历。移除配置只停止同步，不删除服务器上的数据。</p>
+    <div class="caldav-field">
+      <label class="caldav-field-label">服务器名称</label>
+      <input class="caldav-input" data-s="server-name"/>
+    </div>
     <div class="caldav-field">
       <label class="caldav-field-label">服务器地址</label>
       <input class="caldav-input" data-s="server" placeholder="http://192.168.1.10:5232/ 或 https://dav.example.com/" value="${escape(s.serverUrl)}"/>
@@ -252,8 +342,16 @@ function settingsHtml(s: PanelCtx["store"]["settings"], mobile: boolean): string
   </div>
 
   <div class="caldav-section caldav-section--card">
-    <div class="caldav-section-title"><span class="caldav-section-icon">${icons.calendar}</span>日历</div>
+    <div class="caldav-section-title"><span class="caldav-section-icon">${icons.calendar}</span>当前服务器的日历</div>
     <div class="caldav-set-cals" data-cals></div>
+    <p class="caldav-set-hint">能力由服务器返回；未声明能力的日历按兼容模式处理。新建时只列出已启用且支持对应类型的日历。</p>
+  </div>
+
+  <div class="caldav-section caldav-section--card">
+    <div class="caldav-section-title">新建条目的默认路径（所有服务器）</div>
+    <div class="caldav-field"><label class="caldav-field-label">新增日程（VEVENT）</label><select class="caldav-input" data-s="default-event"></select></div>
+    <div class="caldav-field"><label class="caldav-field-label">新增待办（VTODO）</label><select class="caldav-input" data-s="default-todo"></select></div>
+    <p class="caldav-set-hint">待办默认不设置开始日期和到期日；可在编辑器中分别选填。日程需要开始和结束时间。</p>
   </div>
 
   <div class="caldav-section caldav-section--card">
@@ -378,14 +476,15 @@ function renderCalChecks(el: HTMLElement, cals: CalCalendar[]): void {
   box.innerHTML = cals
     .map(
       (c, i) => `
-    <div class="caldav-set-cal" data-idx="${i}">
+    <div class="caldav-set-cal" data-idx="${i}" data-url="${escape(c.url)}">
       <input type="checkbox" ${c.enabled ? "checked" : ""}/>
       <input class="caldav-input" data-role="name" value="${escape(c.displayName)}" title="${escape(c.url)}"/>
       <span class="caldav-set-cal-tags">${
         // 顺序固定为「日程」在前、「任务」在后；只给该日历支持的组件出药丸（不支持就没有对应色可配）
-        (c.supportsEvent ? colorPillHtml("eventColor", "日程", calEventColor(c)) : "") +
-        (c.supportsTodo ? colorPillHtml("todoColor", "任务", calTodoColor(c)) : "")
+        (c.supportsEvent !== false ? colorPillHtml("eventColor", "日程", calEventColor(c)) : "") +
+        (c.supportsTodo !== false ? colorPillHtml("todoColor", "待办", calTodoColor(c)) : "")
       }</span>
+      <small class="caldav-set-cal-path">${escape(c.url)}${c.supportsEvent === undefined || c.supportsTodo === undefined ? " · 能力未声明" : !c.supportsEvent && !c.supportsTodo ? " · 不支持日程或待办" : ""}</small>
     </div>`
     )
     .join("");

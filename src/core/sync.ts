@@ -4,7 +4,8 @@
  * - 上传：本地脏条目 PUT（带 If-Match），412 冲突按策略处理
  * - 删除：本地 deleted 标记 -> 服务端 DELETE
  */
-import type { CalItem } from "./types";
+import type { CalItem, CalCalendar } from "./types";
+import { serverForCalendar, configuredServers, calendarSupports } from "./types";
 import { keyOf, type CalStore } from "./store";
 import {
   syncCollection,
@@ -80,12 +81,30 @@ export class SyncEngine {
     private getChannel: () => Channel
   ) {}
 
-  private auth(): DavAuth {
-    return { username: this.store.settings.username, password: this.store.settings.password };
+  private connection(cal: CalCalendar) {
+    const server = serverForCalendar(this.store.settings, cal);
+    if (!server) throw new Error("日历未关联服务器，请重新发现日历");
+    const issue = this.store.serverCredentialsIssue(server.id);
+    if (issue) throw new Error(`${server.name}: ${issue}`);
+    if (staleCalendarNames(server.serverUrl, [cal]).length) throw new Error("服务器地址已变更，请重新发现日历");
+    return server;
   }
 
-  private channel(): Channel {
-    return this.getChannel();
+  private auth(cal: CalCalendar): DavAuth {
+    const server = this.connection(cal);
+    return { username: server.username, password: server.password };
+  }
+
+  private channel(cal: CalCalendar): Channel {
+    return this.store.settings.servers ? this.connection(cal).channel : this.getChannel();
+  }
+
+  private itemCalendar(item: CalItem): CalCalendar {
+    const cal = this.store.settings.calendars.find((c) => c.url === item.calendarUrl);
+    if (!cal?.enabled) throw new Error("日历未启用或已移除，本地改动已保留");
+    // 资源地址必须在自己的集合下面，避免向错误的地址发送凭据。
+    if (!item.href.startsWith(cal.url.replace(/\/+$/, "") + "/")) throw new Error("资源地址与日历路径不匹配");
+    return cal;
   }
 
   /** 启动定时同步（分钟） */
@@ -138,7 +157,7 @@ export class SyncEngine {
       }
       // 服务器地址改过、但日历地址没跟着更新 → 明确报错。
       // 否则会静默地去连旧服务器并「同步成功」，让用户以为新地址是可用的。
-      const stale = staleCalendarNames(this.store.settings.serverUrl, enabledCals);
+      const stale = this.store.settings.servers ? [] : staleCalendarNames(this.store.settings.serverUrl, enabledCals);
       if (stale.length) {
         const msg = `服务器地址已变更，以下日历仍指向旧地址，请到设置里重新「发现日历」：${stale.join("、")}`;
         report.ok = false;
@@ -156,6 +175,7 @@ export class SyncEngine {
       for (const cal of this.store.settings.calendars) {
         if (!cal.enabled) continue;
         try {
+          this.connection(cal);
           let items: CalItem[] = [];
           let deletedHrefs: string[] = [];
           // ⚠️ sync-token 的语义是「服务端截至该 token 时刻的全量，我本地已经全都有了」。
@@ -175,7 +195,7 @@ export class SyncEngine {
           }
           if (cal.syncToken) {
             try {
-              const r = await syncCollection(cal, this.channel(), this.auth(), cal.syncToken);
+              const r = await syncCollection(cal, this.channel(cal), this.auth(cal), cal.syncToken);
               items = r.items;
               deletedHrefs = r.deletedHrefs;
               if (r.syncToken) cal.syncToken = r.syncToken;
@@ -188,8 +208,8 @@ export class SyncEngine {
           if (!cal.syncToken) {
             const r = await fetchCalendarItems(
               cal,
-              this.channel(),
-              this.auth(),
+              this.channel(cal),
+              this.auth(cal),
               icsRangeIso(rangeStart),
               icsRangeIso(rangeEnd)
             );
@@ -258,6 +278,7 @@ export class SyncEngine {
   /** 凭据不可用时的统一提示（密码为空/解密失败），避免静默 401 */
   private credentialError(): string | undefined {
     const s = this.store.settings;
+    if (s.servers) return configuredServers(s).length ? undefined : "未配置服务器地址";
     if (!s.serverUrl) return "未配置服务器地址";
     if (!s.username) return "未填写用户名";
     if (this.store.pendingUnlock) return "密码待解密（密钥尚未就绪），稍后会自动重试";
@@ -270,7 +291,7 @@ export class SyncEngine {
     const norm = (u: string) => decodeURIComponent(u).replace(/\/+$/, "");
     for (const it of this.store.getAll()) {
       if (norm(it.href) === norm(href) && it.calendarUrl === calUrl) {
-        return it.recurId ? `${it.uid}|${it.recurId}|${it.kind}` : `${it.uid}|${it.kind}`;
+        return keyOf(it);
       }
     }
     return undefined;
@@ -286,8 +307,8 @@ export class SyncEngine {
           body: `<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:"><D:prop><D:sync-token/></D:prop></D:propfind>`,
           timeoutMs: 15000
         },
-        this.channel(),
-        this.auth()
+        this.channel(cal),
+        this.auth(cal)
       );
       if (res.status >= 400) return undefined;
       const m = /<(?:[A-Za-z0-9_-]+:)?sync-token[^>]*>([^<]*)</.exec(res.body);
@@ -321,7 +342,7 @@ export class SyncEngine {
   private async reconcile(cal: import("./types").CalCalendar, report: SyncReport): Promise<void> {
     let names: string[];
     try {
-      names = await listResourceNames(cal, this.channel(), this.auth());
+      names = await listResourceNames(cal, this.channel(cal), this.auth(cal));
     } catch (e: any) {
       console.warn(`[caldav] ${cal.displayName}: 资源清单对账跳过（${explainError(e)}）`);
       return;
@@ -361,11 +382,20 @@ export class SyncEngine {
     // 新建 / 修改
     for (const item of this.store.dirtyItems()) {
       try {
+        const cal = this.itemCalendar(item);
+        if (!calendarSupports(cal, item.kind)) throw new Error("日历不支持此条目类型，请选择兼容的日历");
         const ics = item.raw ? itemToEditedICS(item) : itemToNewICS(item);
-        const r = await putItem(item, ics, this.channel(), this.auth());
+        const r = await putItem(item, ics, this.channel(cal), this.auth(cal));
         item.etag = r.etag;
         item.dirty = false;
         item.raw = item.raw || ics; // 新建后保留原文
+        if (item.movedFrom) {
+          const source = item.movedFrom;
+          source.dirty = true;
+          source.deleted = true;
+          this.store.put(source);
+          item.movedFrom = undefined;
+        }
         report.uploaded++;
       } catch (e: any) {
         if (e?.status === 412) {
@@ -375,7 +405,8 @@ export class SyncEngine {
             item.etag = undefined;
             try {
               const ics = itemToEditedICS(item);
-              const r = await putItem(item, ics, this.channel(), this.auth());
+              const cal = this.itemCalendar(item);
+              const r = await putItem(item, ics, this.channel(cal), this.auth(cal));
               item.etag = r.etag || keep;
               item.dirty = false;
               report.uploaded++;
@@ -397,7 +428,8 @@ export class SyncEngine {
     // 删除
     for (const item of this.store.deletedItems()) {
       try {
-        await deleteItem(item, this.channel(), this.auth());
+        const cal = this.itemCalendar(item);
+        await deleteItem(item, this.channel(cal), this.auth(cal));
         report.deleted++;
         // 删除成功后从本地移除，否则每次同步都会重复发 DELETE
         this.store.remove(keyOf(item));
@@ -416,7 +448,8 @@ export class SyncEngine {
   }
 
   /** 更新条目 */
-  async updateItem(item: CalItem): Promise<void> {
+  async updateItem(item: CalItem, previous?: CalItem): Promise<void> {
+    if (previous && previous.calendarUrl !== item.calendarUrl) item.movedFrom = { ...previous, movedFrom: undefined };
     item.dirty = true;
     this.store.putAndEmit(item);
     await this.pushAndPersist();

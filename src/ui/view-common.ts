@@ -1,5 +1,6 @@
 /** 视图渲染公共类型 */
 import type { CalItem, SortMode } from "../core/types";
+import { keyOf } from "../core/store";
 import { DEFAULT_CATEGORIES, calEventColor, calTodoColor } from "../core/types";
 import type { PanelCtx } from "./panel";
 import { occurrencesInRange } from "../core/ics";
@@ -30,7 +31,7 @@ export function todoDueOccurrences(it: CalItem, startMs: number, endMs: number):
 }
 
 export function keyOfItem(it: CalItem): string {
-  return it.recurId ? `${it.uid}|${it.recurId}|${it.kind}` : `${it.uid}|${it.kind}`;
+  return keyOf(it);
 }
 
 /**
