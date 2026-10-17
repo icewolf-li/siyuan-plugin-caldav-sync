@@ -2096,6 +2096,7 @@ input.caldav-input[type="time"]:hover::-webkit-calendar-picker-indicator {
 .caldav-progress-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
 .caldav-progress-row input[type="range"] {
   flex: 1;
+  min-width: 0;
   accent-color: var(--caldav-accent);
   height: 4px;
   border-radius: 999px;
@@ -2225,7 +2226,7 @@ input.caldav-input[type="time"]:hover::-webkit-calendar-picker-indicator {
   justify-content: flex-start;
   gap: 8px;
   margin-bottom: 8px;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
 }
 .caldav-title-head .caldav-title-label {
   margin-bottom: 0;
@@ -4184,4 +4185,65 @@ input.caldav-input[type="time"]:hover::-webkit-calendar-picker-indicator {
 .caldav-range-target.is-checked {
   color: var(--caldav-accent);
   font-weight: 500;
+}
+.caldav-server-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.caldav-server-controls select { flex: 1 1 180px; min-width: 0; }
+.caldav-settings select { max-width: 100%; min-width: 0; }
+.caldav-set-cal { flex-wrap: wrap; }
+.caldav-set-cal-path { flex: 1 1 100%; overflow-wrap: anywhere; color: var(--b3-theme-on-surface); font-size: 11px; }
+.caldav-dock-create { display: flex; align-items: center; gap: 6px; padding: 8px 12px 0; }
+.caldav-dock-create .caldav-btn { flex: 1; height: 34px; justify-content: center; white-space: nowrap; min-width: 0; padding: 0 6px; }
+.caldav-dock-create .caldav-dock-act { flex: 0 0 34px; width: 34px; height: 34px; }
+.caldav-dock-act.is-syncing svg { animation: caldav-btn-spin .9s linear infinite; }
+
+/* 桌面端均分卡片，手机端纵向排列并允许滚动。 */
+.caldav-item-dialog { container: caldav-item / inline-size; }
+.caldav-item-dialog.caldav-mobile-dialog { container-name: caldav-mobile-item; }
+.caldav-item-dialog > .b3-dialog__body,
+.caldav-item-dialog > .b3-dialog__content {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0 !important;
+}
+.caldav-item-dialog .caldav-editor--split { flex: 1 1 auto; min-width: 0; min-height: 0; height: auto; }
+.caldav-editor-column-title { display: none; margin: 0 0 14px; font-size: 14px; font-weight: 600; color: var(--caldav-text); }
+.caldav-editor--split .caldav-editor-note-card { margin-bottom: 0; }
+.caldav-editor--split .caldav-editor-note-card textarea { resize: vertical; }
+@container caldav-item (min-width: 800px) {
+  .caldav-editor--split > .caldav-editor-form {
+    display: grid;
+    grid-template-columns: minmax(0, 11fr) minmax(0, 9fr);
+    gap: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+  .caldav-editor--split .caldav-editor-column-title { display: block; margin-bottom: 10px; }
+  .caldav-editor--split .caldav-section { margin-bottom: 10px; gap: 8px; }
+  .caldav-editor--split .caldav-section--card { padding: 10px 12px; }
+  .caldav-editor--split .caldav-title-head { margin-bottom: 0; }
+  .caldav-editor--split .caldav-title-input { height: 42px; }
+  .caldav-editor--split .caldav-set-hint { margin: 0; line-height: 1.4; }
+  .caldav-editor--split .caldav-cat-pill { padding: 5px 9px; gap: 4px; font-size: 12px; }
+  .caldav-editor--split .caldav-alarm-list:empty { display: none; }
+  .caldav-editor--split .caldav-tab-panel {
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 12px 16px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--caldav-border) transparent;
+  }
+  .caldav-editor--split [data-panel="basic"] { display: block !important; }
+  .caldav-editor--split [data-panel="note"] {
+    display: flex !important;
+    flex-direction: column;
+    border-left: 1px solid var(--caldav-border);
+    background: var(--caldav-bg);
+  }
+  .caldav-editor--split [data-panel="note"] > .caldav-section { flex: 0 0 auto; }
+  .caldav-editor--split .caldav-editor-note-card { min-height: 0; margin: 0; }
+  .caldav-editor--split .caldav-editor-note-card textarea { height: clamp(100px, 14vh, 160px); min-height: 100px; resize: vertical; }
 }

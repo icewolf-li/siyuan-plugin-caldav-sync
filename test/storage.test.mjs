@@ -225,7 +225,7 @@ await t("全新安装不写出数据文件", async () => {
 // ---- 9. 保存走的是新文件名（否则迁移完又会在旧名上长出新数据） ----
 await t("后续保存写入新文件名，不再产生旧文件", async () => {
   const plugin = await boot({ [LEGACY_FILE]: legacyFixture() });
-  plugin.store.settings.username = "改过了";
+  plugin.store.settings.servers[0].username = "改过了";
   await plugin.store.persist();
   assert.ok(plugin.__stores.has(DATA_FILE), "保存应写入新文件名");
   assert.strictEqual(

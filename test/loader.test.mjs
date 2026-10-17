@@ -286,6 +286,9 @@ document.querySelectorAll(".caldav-editor").forEach((e) => e.remove());
 
 // ---- 新建待办：不应显示「持续」时长，且「粘贴自动识别日期」默认开启 ----
 click(tabEl.querySelector('[data-action="new-todo"]'));
+for (const name of ["startDate", "startTime", "endDate", "endTime"]) {
+  assert.strictEqual(document.querySelector(`[data-f="${name}"]`).value, "", "普通新增待办默认不设置日期时间");
+}
 const todoEditor = document.querySelector(".caldav-editor");
 assert.ok(todoEditor, "点击主面板「待办」应打开编辑弹窗");
 assert.ok(
@@ -820,15 +823,16 @@ if (serverInput) serverInput.value = "";
 click(settingsEl.querySelector("[data-action='test']"));
 const testMsg = settingsEl.querySelector("[data-msg]");
 assert.ok(testMsg && testMsg.textContent.includes("服务器地址不能为空"), "空 URL 测试连接应提示服务器地址不能为空");
+serverInput.value = plugin.store.settings.serverUrl;
 
 // ---- 日历颜色：单一 color 迁移成 eventColor/todoColor；「任务」「日程」药丸即取色器 ----
 const calRows = Array.from(settingsEl.querySelectorAll(".caldav-set-cal"));
 assert.ok(calRows.length >= 1, "设置弹窗应列出已配置的日历");
 const row0 = calRows[0];
-const cal0 = plugin.store.settings.calendars[0];
+let cal0 = plugin.store.settings.calendars[0];
 // 老数据（seedStore 只给了 color）渲染时就地升级：两色都继承原色，存量条目观感不变
-assert.strictEqual(cal0.eventColor, "#3b82f6", "旧 color 应迁移为日程默认色 eventColor");
-assert.strictEqual(cal0.todoColor, "#3b82f6", "旧 color 应同时迁移为待办默认色 todoColor（不改变观感）");
+assert.strictEqual(row0.querySelector('[data-role="eventColor"]').value, "#3b82f6", "草稿中的日程色应继承旧 color");
+assert.strictEqual(row0.querySelector('[data-role="todoColor"]').value, "#3b82f6", "草稿中的待办色应继承旧 color");
 // 原来左侧那个独立的日历颜色方块必须去掉
 assert.strictEqual(
   Array.from(row0.children).filter((e) => e.tagName === "INPUT" && e.type === "color").length,
@@ -849,8 +853,8 @@ assert.deepStrictEqual(
   "药丸顺序应为「日程」在前、「任务」在后"
 );
 assert.ok(
-  (todoPill.textContent || "").includes("任务") && (evPill.textContent || "").includes("日程"),
-  "药丸文字应仍为「任务」「日程」"
+  (todoPill.textContent || "").includes("待办") && (evPill.textContent || "").includes("日程"),
+  "药丸文字应为「待办」「日程」"
 );
 assert.strictEqual(
   todoPill.style.getPropertyValue("--tag-color").trim(),
@@ -872,6 +876,7 @@ evInput.dispatchEvent(new Event("input", { bubbles: true }));
 
 click(settingsEl.querySelector("[data-action='save']"));
 await settle(6);
+cal0 = plugin.store.settings.calendars[0];
 assert.strictEqual(cal0.todoColor, "#00c853", "保存后待办默认色应落库");
 assert.strictEqual(cal0.eventColor, "#ff5252", "保存后日程默认色应落库");
 assert.strictEqual(cal0.color, "#ff5252", "旧 color 字段应镜像 eventColor（旧版本端回读同一份数据不变灰）");
@@ -896,14 +901,14 @@ catItem.categories = ["工作"]; // 工作 = #e05a4c
 plugin.store.putAndEmit(catItem);
 click(tabEl.querySelector('[data-view="month"]'));
 assert.strictEqual(
-  chipStyle("seed-11@test|todo"),
+  chipStyle(`${encodeURIComponent(catItem.calendarUrl)}|seed-11@test|todo`),
   "#e05a4c",
   "命中分类的待办仍取分类颜色，不应被 todoColor 覆盖"
 );
 catItem.categories = undefined;
 plugin.store.putAndEmit(catItem);
 click(tabEl.querySelector('[data-view="month"]'));
-assert.strictEqual(chipStyle("seed-11@test|todo"), "#00c853", "去掉分类后应回落到待办默认色");
+assert.strictEqual(chipStyle(`${encodeURIComponent(catItem.calendarUrl)}|seed-11@test|todo`), "#00c853", "去掉分类后应回落到待办默认色");
 
 document.querySelector(".b3-dialog .b3-dialog--close")?.remove();
 settingsEl?.closest(".b3-dialog")?.remove();

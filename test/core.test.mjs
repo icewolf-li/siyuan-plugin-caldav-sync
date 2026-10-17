@@ -188,10 +188,11 @@ t("DTSTART 作为开始、DUE 作为截止", () => {
   assert.ok(a.start.includes("T09:00"), "start=" + a.start);
   assert.ok(a.end.includes("T18:00"), "end=" + a.end);
 });
-t("旧数据只有 DUE 时用 DUE 兜底开始", () => {
+t("只有 DUE 的待办保留空 DTSTART", () => {
   const b = todoItems.find((x) => x.uid === "t2@test");
   assert.ok(b.end.includes("T12:00"), "end=" + b.end);
-  assert.strictEqual(b.start, b.end);
+  assert.strictEqual(b.start, "");
+  assert.ok(!/DTSTART/.test(ics.itemToNewICS(b)), "保存到期日不能凭空新增开始时间");
 });
 t("无日期待办解析为空", () => {
   const c = todoItems.find((x) => x.uid === "t3@test");

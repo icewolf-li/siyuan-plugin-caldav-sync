@@ -601,7 +601,7 @@ export function renderPanel(root: HTMLElement, ctx: PanelCtx): { destroy: () => 
     if (action === "new-event" || action === "new-todo") {
       const kind: CalKind = action === "new-event" ? "event" : "todo";
       // 只给日期，时刻交给编辑弹窗补默认值（今天 = 下一个整点）
-      openEditor(ctx, { kind, start: ctx.cursor });
+      openEditor(ctx, { kind, start: kind === "event" ? ctx.cursor : undefined });
       return;
     }
     if (action === "calfilter") {
@@ -747,6 +747,7 @@ export interface DockPanelOpts {
   /** 主窗口当前视图（合并按钮的悬停提示要用它说明「点下去会去哪个视图」） */
   viewMode: () => ViewMode;
   onOpenEditor: (item: CalItem) => void;
+  onCreate: (kind: CalKind) => void;
   onToggleDone: (item: CalItem) => void | Promise<void>;
 }
 
@@ -767,14 +768,17 @@ export function renderDockPanel(
   原两行（上行 5 个图标按钮 + 下行日期范围/分类筛选）→ 现在**一行三个操作点**：
   ① 日期范围下拉框 ② 筛选 ③ 打开视图（2026-10-10 二次调整：筛选与打开视图左右互换，
   筛选靠前、打开视图居末）。
-  去掉的按钮与去处：
-    · 新建 / 刷新 —— 主窗口工具栏已有（+日程 / +待办 / 立即同步），
-      Dock 页脚状态条也能点击同步；
+  新建日程、待办和刷新放在独立操作行；页脚状态条也能点击同步。
     · 排序 —— 任务视图本身按时间轴分桶、组内已排序，Dock 里用处不大；
     · **日历视图 / 任务视图两个按钮合并成一个**（图标用打勾的日历 calCheck）：
       点击打开「主窗口上次用的那个视图」，省下的一格让日期范围下拉显示完整。
   筛选弹层见下方 catPop 的注释 —— 它挂在 body 上，不在这个模板里。
 -->
+<div class="caldav-dock-create">
+  <button class="caldav-btn" data-action="new-event" title="新增日程（VEVENT）">${icons.plus} 日程</button>
+  <button class="caldav-btn" data-action="new-todo" title="新增待办（VTODO）">${icons.plus} 待办</button>
+  <button class="caldav-dock-act" data-action="refresh" title="刷新并同步所有服务器" aria-label="刷新并同步所有服务器">${icons.sync}</button>
+</div>
 <div class="caldav-dock-tools">
   <div class="caldav-dock-filter-wrap">
     <button class="caldav-dock-select" data-dock="filter" data-toggle="dock-filter" type="button">
@@ -805,6 +809,7 @@ export function renderDockPanel(
   const listEl = root.querySelector("[data-dock='items']") as HTMLElement;
   const pops = Array.from(root.querySelectorAll<HTMLElement>(".caldav-dock-pop"));
   let destroyed = false;
+  let syncBusy = false;
 
   /**
    * 筛选弹层 —— **挂到 document.body**，而不是留在 Dock 内部。
@@ -1346,14 +1351,21 @@ export function renderDockPanel(
     if (popItem && root.contains(popItem)) {
       const a = popItem.dataset.action!;
       closePops();
-      // 注：新增 / 排序 / 刷新三个动作已从 Dock 移除（见模板顶部说明），
-      // 这里不再有 add-* / sort-* 分支。`sync` 仍保留 —— 页脚状态按钮
-      // （.caldav-dock-status）走的就是它，是 Dock 里剩下的唯一同步入口。
+      if (a === "new-event" || a === "new-todo") return opts.onCreate(a === "new-event" ? "event" : "todo");
+      // 新建入口区分条目类型；刷新按钮与页脚状态条共享同步状态。
       // 不传 mode = 打开「主窗口上次用的视图」（日历/任务两个按钮已合并，见模板注释）。
       if (a === "open-view") return opts.onNav();
-      if (a === "sync") {
+      if (a === "sync" || a === "refresh") {
+        if (syncBusy) return;
+        syncBusy = true;
+        const refreshBtn = root.querySelector<HTMLButtonElement>('[data-action="refresh"]')!;
+        refreshBtn.disabled = true;
+        refreshBtn.classList.add("is-syncing");
         statusEl.textContent = "同步中…";
-        void opts.onSync().finally(() => {
+        void opts.onSync().catch((e) => { opts.store.lastError = e?.message || String(e); }).finally(() => {
+          syncBusy = false;
+          refreshBtn.disabled = false;
+          refreshBtn.classList.remove("is-syncing");
           renderStatus();
           renderDockList();
         });

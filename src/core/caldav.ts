@@ -127,7 +127,7 @@ export async function discoverCalendars(
   const listRes = await dav(
     home,
     "PROPFIND",
-    `<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:a="urn:ietf:params:xml:ns:caldav-extensions"><D:prop><D:resourcetype/><D:displayname/><cs:getctag/><a:calendar-color/><D:current-user-privilege-set/></D:prop></D:propfind>`,
+    `<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:a="urn:ietf:params:xml:ns:caldav-extensions"><D:prop><D:resourcetype/><D:displayname/><cs:getctag/><a:calendar-color/><D:current-user-privilege-set/><c:supported-calendar-component-set/></D:prop></D:propfind>`,
     channel,
     auth,
     "1"
@@ -148,17 +148,14 @@ export async function discoverCalendars(
     let color = colorM ? colorM[1].trim() : "";
     if (/^#[0-9a-fA-F]{8}$/.test(color)) color = color.slice(0, 7);
     if (!/^#[0-9a-fA-F]{6}$/.test(color)) color = COLORS[colorIdx++ % COLORS.length];
-    const supported = pickHrefXml(chunk); // 无用，占位
-    void supported;
-    const compM = chunk.match(/<(?:[A-Za-z0-9_-]+:)?comp[^>]*name="(VEVENT|VTODO)"/g);
-    let supportsEvent = true;
-    let supportsTodo = true;
-    if (compM && compM.length) {
-      const set = new Set(compM.map((c) => /name="(VEVENT|VTODO)"/.exec(c)![1]));
-      supportsEvent = set.has("VEVENT");
-      supportsTodo = set.has("VTODO");
-      if (!set.size) { supportsEvent = true; supportsTodo = true; }
-    }
+    // 只读成功的 propstat，避免把 404 属性当成「不支持任何组件」。
+    const goodProps = [...chunk.matchAll(/<(?:[\w-]+:)?propstat\b[^>]*>([\s\S]*?)<\/(?:[\w-]+:)?propstat>/gi)]
+      .filter((m) => /HTTP\/[^<]*\s200\b/.test(pickTextXml(m[1], "status")[0] || ""))
+      .map((m) => m[1]).join("");
+    const capability = /<(?:[\w-]+:)?supported-calendar-component-set\b[^>]*(?:\/>|>[\s\S]*?<\/(?:[\w-]+:)?supported-calendar-component-set>)/i.exec(goodProps);
+    const components = capability ? [...capability[0].matchAll(/<(?:[\w-]+:)?comp\b[^>]*\bname\s*=\s*["']([^"']+)["']/gi)].map((m) => m[1].toUpperCase()) : undefined;
+    const supportsEvent = components ? components.includes("VEVENT") : undefined;
+    const supportsTodo = components ? components.includes("VTODO") : undefined;
     const url = toAbsolute(base, href);
     const desc = pickTextXml(chunk, "description")[0] || "";
     calendars.push({
@@ -189,7 +186,7 @@ export async function fetchCalendarItems(
   if (cal.supportsEvent !== false) {
     kindFilters.push(`<c:comp-filter name="VEVENT"><c:time-range start="${rangeStartIsoUtc}" end="${rangeEndIsoUtc}"/></c:comp-filter>`);
   }
-  if (cal.supportsTodo) {
+  if (cal.supportsTodo !== false) {
     kindFilters.push(`<c:comp-filter name="VTODO"/>`);
   }
   const items: CalItem[] = [];

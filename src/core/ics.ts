@@ -176,8 +176,8 @@ function itemFromComponent(comp: IcsComponent, kind: CalKind, calendarUrl: strin
   const summary = unescapeText(firstProp(comp, "SUMMARY")?.value || "");
   const dtstartProp = firstProp(comp, "DTSTART");
   const dueProp = firstProp(comp, "DUE");
-  // 事件以 DTSTART 为准；待办 DTSTART = 开始、DUE = 截止，旧数据只有 DUE 时用作兜底
-  const startProp = kind === "event" ? dtstartProp : dtstartProp || dueProp;
+  // DTSTART 和 DUE 独立保留；只有到期日的待办不应凭空补出开始时间。
+  const startProp = dtstartProp;
   if (!startProp && kind === "event") return undefined;
   const item: CalItem = {
     uid,
@@ -186,7 +186,7 @@ function itemFromComponent(comp: IcsComponent, kind: CalKind, calendarUrl: strin
     href,
     etag,
     summary,
-    allDay: kind === "event" ? !!(startProp && /^\d{8}$/.test(startProp.value.trim())) : false,
+    allDay: !!((startProp || dueProp) && /^\d{8}$/.test((startProp || dueProp)!.value.trim())),
     start: startProp ? parseIcsStamp(startProp) : ""
   };
   const desc = firstProp(comp, "DESCRIPTION");
@@ -367,7 +367,7 @@ function rebuildComponent(comp: IcsComponent, item: CalItem): IcsComponent {
     props.push({ name: "BEGIN", params: {}, value: "VALARM" });
     props.push({ name: "ACTION", params: {}, value: "DISPLAY" });
     props.push({ name: "DESCRIPTION", params: {}, value: escapeText(item.summary || "提醒") });
-    props.push({ name: "TRIGGER", params: {}, value: `-PT${a.minutesBefore}M` });
+    props.push({ name: "TRIGGER", params: item.kind === "todo" && !item.start && item.end ? { RELATED: "END" } : {}, value: `-PT${a.minutesBefore}M` });
     props.push({ name: "END", params: {}, value: "VALARM" });
   }
   return { type: comp.type, props, children: [] };

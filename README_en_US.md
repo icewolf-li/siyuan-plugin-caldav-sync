@@ -11,7 +11,8 @@ Manage calendars and todos on your CalDAV server (Radicale / Nextcloud / Baikal 
 - **Five views**: year view (12-month grid with busy dates marked, click a month/day to jump), month view, week view (time grid + current-time line), day view, and task view (dropdown-filter style, inspired by the SiYuan plugin "任务笔记管理": today / tomorrow / next 7 days / this week / future / overdue / last 7 days / all undone / no date / done today / done yesterday / done, with counts and quick add)
 - **Event sorting**: the "Sort" dropdown on the top-right supports sorting by event start / end time, affecting month-view cells and the week-view all-day area
 - **Full editing**: title, calendar, all-day, start/end, recurrence (day/week/month/year + interval + weekdays + end conditions), reminders, location, tags, notes, priority, status, completion
-- **Multiple calendars**: color-coded (category color first, calendar color as fallback), individually toggleable, default calendar for new items
+- **Multiple servers and calendars**: separate accounts and request channels, VEVENT / VTODO capability discovery, and separate default calendars for events and tasks
+- **Optional task dates**: new tasks have no start or due date by default; a due date can be set independently, without a duration
 - **Recurring events**: RRULE expansion with EXDATE support
 - **Daily note integration**: insert today's schedule & todos into the daily note (only items actually due today; todos are placed by due date; the note is opened afterwards and repeated clicks update the previously inserted section instead of appending again)
 - **Two request channels**: SiYuan kernel proxy (no CORS) by default, automatic fallback to direct browser requests
@@ -19,12 +20,10 @@ Manage calendars and todos on your CalDAV server (Radicale / Nextcloud / Baikal 
 ## Install
 
 1. Install from SiYuan marketplace ("Settings → Marketplace → Downloaded"), or unzip `package.zip` into `workspace/data/plugins/siyuan-plugin-caldav-sync/`
-2. Restart SiYuan, click the "Calendar & Tasks" dock icon on the left. Under the title is a row of 5 buttons:
-   - **New event / todo** (dropdown): opens the editor dialog
-   - **Sort** (dropdown): by event start / end time
-   - **Calendar view**: opens the calendar tab in the main window (year / month / week / day switchable at the top)
-   - **Task view**: opens the task view tab
-   - **Refresh**: sync now
+2. Restart SiYuan and open the "Calendar & Tasks" dock:
+   - **Event / Task**: create the corresponding item using its default calendar
+   - **Refresh**: sync all enabled server calendars
+   - **Date range / Filters / Open view**: filter dock items or open the last calendar/task view
 3. In the calendar tab, use the "Year / Month / Week / Day" segmented control to switch views
 
 ## Configuration
@@ -41,7 +40,9 @@ Manage calendars and todos on your CalDAV server (Radicale / Nextcloud / Baikal 
 | Conflict policy | Server-first / local-first on 412 conflicts |
 | Sync range | Past N days / future N days |
 
-Click "Test Connection", then "Discover Calendars", pick the calendars you want and save.
+Add and switch server profiles, then test and discover calendars for each profile. Select separate default paths for events (VEVENT) and tasks (VTODO). Only enabled calendars supporting the corresponding type are offered; missing capability declarations use compatibility mode. Calendar choices remain editable when creating an item. Cancel discards the settings draft, and removing a profile does not delete remote data. Existing single-server settings migrate automatically.
+
+`npm run build` only produces the local build and `package.zip`; workspace environment variables do not trigger installation. Explicit development installation requires `node scripts/make-package.mjs --install-dev`.
 
 ### Radicale example
 

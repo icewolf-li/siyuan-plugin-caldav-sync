@@ -6,7 +6,7 @@ import { newDialog } from "@/ui/dialog";
 import { isMobile } from "./device";
 import { adoptMobileLayer } from "./mobile-layers";
 import type { Alarm, CalCalendar, CalItem, CalKind, CategoryDef, Recurrence } from "../core/types";
-import { DEFAULT_CATEGORIES, calEventColor } from "../core/types";
+import { DEFAULT_CATEGORIES, calEventColor, creationCalendars, defaultCalendarFor, calendarSupports, configuredServers } from "../core/types";
 import { keyOf } from "../core/store";
 import { addDays, defaultStartStamp, isDateOnly, parseLocalStamp, stampOfMs, todayStamp } from "../core/date";
 import type { PanelCtx } from "./panel";
@@ -25,15 +25,15 @@ export interface EditorPreset {
 export function openEditor(ctx: PanelCtx, preset: EditorPreset): void {
   const editing = preset.item;
   const kind: CalKind = editing ? editing.kind : preset.kind || "event";
-  const cals = ctx.store.settings.calendars;
+  const cals = creationCalendars(ctx.store.settings, kind);
+  // 现有条目仍能在其原日历中查看；保存时重新检查日历是否可写。
+  const originalCal = editing && ctx.store.settings.calendars.find((c) => c.url === editing.calendarUrl);
+  if (originalCal && !cals.some((c) => c.url === originalCal.url)) cals.push(originalCal);
   if (!cals.length) {
-    alert("请先在设置中配置并发现 CalDAV 日历");
+    alert(`没有可用于${kind === "todo" ? "待办（VTODO）" : "日程（VEVENT）"}的日历，请在设置中发现并启用兼容的日历`);
     return;
   }
-  const defaultCal =
-    cals.find((c) => c.url === ctx.store.settings.defaultCalendarUrl) ||
-    cals.find((c) => c.enabled) ||
-    cals[0];
+  const defaultCal = defaultCalendarFor(ctx.store.settings, kind) || cals[0];
 
   const isNew = !editing;
   // 新建时的默认开始时间：日期是今天就落在「下一个整点」，其它日期落在当天 09:00
@@ -47,28 +47,26 @@ export function openEditor(ctx: PanelCtx, preset: EditorPreset): void {
         href: defaultCal.url.replace(/\/+$/, "") + "/" + genUid() + ".ics",
         summary: "",
         allDay: false,
-        start: newStart,
-        end: preset.end || addHoursStr(newStart, 1),
+        start: kind === "todo" ? "" : newStart,
+        end: kind === "todo" ? preset.end || preset.start : preset.end || addHoursStr(newStart, 1),
         priority: 0,
         status: "NEEDS-ACTION",
         percent: 0,
         createdAt: todayStamp() + "T" + new Date().toTimeString().slice(0, 8)
       };
-  // 待办新建时的默认截止：**下一日的同一时刻**（2026-10-13 雄哥要求，与 Obsidian 侧一致）。
-  // 原先是不给截止（undefined），用户每次都得自己补；现在默认跨一天，
-  // 时间沿用开始时间（本身就是「下一个整点」）。用户仍可清空或自行修改。
-  if (kind === "todo" && isNew) it.end = addDays(it.start, 1);
+  // 从日历日期格新增待办只预填到期日；普通新增待办没有时间范围。
+  if (kind === "todo" && isNew && it.end && isDateOnly(it.end)) it.allDay = true;
 
   const isTodo = it.kind === "todo";
-  // 移动端竖屏（375~430px）放不下 520/560px 定宽弹窗，改为占满视口
+  // 桌面端两侧各留约 10% 视口宽度；移动端保持全屏。
   const mobile = isMobile();
 
   const dialog = newDialog({
     title: isNew ? (isTodo ? "新建待办" : "新建日程") : "编辑" + (isTodo ? "待办" : "日程"),
-    content: `<div class="caldav-editor">${editorHtml(it, cals, ctx.store.settings.categories?.length ? ctx.store.settings.categories : DEFAULT_CATEGORIES, !!ctx.store.settings.categoryMulti, isNew)}</div>`,
-    width: mobile ? "100vw" : isTodo ? "560px" : "520px",
-    height: mobile ? "100vh" : "86vh",
-    containerClassName: mobile ? "caldav-mobile-dialog" : undefined
+    content: `<div class="caldav-editor caldav-editor--split">${editorHtml(it, cals.map((c) => ({ ...c, displayName: `${configuredServers(ctx.store.settings).find((s) => s.id === c.serverId)?.name || "服务器"} / ${c.displayName}` })), ctx.store.settings.categories?.length ? ctx.store.settings.categories : DEFAULT_CATEGORIES, !!ctx.store.settings.categoryMulti, isNew)}</div>`,
+    width: mobile ? "100vw" : "80vw",
+    height: mobile ? "100vh" : "90vh",
+    containerClassName: mobile ? "caldav-item-dialog caldav-mobile-dialog" : "caldav-item-dialog"
   });
   // 移动端：编辑弹窗是「叠在当前页面之上」的一层，同时只留一个。
   // 层的收放一律以 DOM 为准（见 ui/mobile-layers.ts），关闭时不需要再回账。
@@ -262,15 +260,9 @@ function editorHtml(
   const alarmRows = (it.alarms || []).map((a) => alarmRowHtml(a.minutesBefore)).join("");
 
   return `
-<div class="caldav-editor-head">
-  <div class="caldav-tabs">
-    <button class="caldav-tab is-active" data-tab="basic">${isTodo ? "任务设置" : "日程设置"}</button>
-    <button class="caldav-tab" data-tab="note">${isTodo ? "任务备注" : "日程备注"}</button>
-  </div>
-</div>
-
 <div class="caldav-editor-form">
   <div class="caldav-tab-panel" data-panel="basic">
+    <h3 class="caldav-editor-column-title">${isTodo ? "待办设置" : "日程设置"}</h3>
     <div class="caldav-section">
       <div class="caldav-title-head">
         <label class="caldav-field-label caldav-title-label">${isTodo ? "待办标题" : "事件标题"}</label>
@@ -310,7 +302,8 @@ function editorHtml(
     </div>
 
     <div class="caldav-section caldav-section--card">
-      <div class="caldav-section-title"><span class="caldav-section-icon">${icons.clock}</span>日期时间</div>
+      <div class="caldav-section-title"><span class="caldav-section-icon">${icons.clock}</span>日期时间${isTodo ? "（可选）" : ""}</div>
+      ${isTodo ? '<p class="caldav-set-hint">待办无需持续时间，可不设置日期，也可只设置到期日。</p>' : ""}
       <div class="caldav-all-day-row">
         <label class="caldav-switch-line caldav-all-day-switch">
           <span class="caldav-switch-label">全天</span>
@@ -349,7 +342,7 @@ function editorHtml(
       </div>
 
       <div class="caldav-datetime-row">
-        <span class="caldav-datetime-label">结束</span>
+        <span class="caldav-datetime-label">${isTodo ? "到期" : "结束"}</span>
         <div class="caldav-datetime-inputs">
           <div class="caldav-input-wrap caldav-input-wrap--date">
             <span class="caldav-input-icon">${icons.calendar}</span>
@@ -386,6 +379,11 @@ function editorHtml(
       </div>
     </div>
 
+
+  </div>
+
+  <div class="caldav-tab-panel" data-panel="note">
+    <h3 class="caldav-editor-column-title">更多设置与备注</h3>
     <div class="caldav-section caldav-section--card">
       <div class="caldav-section-title"><span class="caldav-section-icon">${icons.repeat}</span>重复设置</div>
       <button type="button" class="caldav-row-btn" data-action="toggle-repeat-detail">
@@ -487,11 +485,10 @@ function editorHtml(
         </div>
       </div>
     </div>
-  </div>
 
-  <div class="caldav-tab-panel" data-panel="note" style="display:none">
-    <div class="caldav-section caldav-section--card">
-      <textarea class="caldav-input caldav-textarea" data-f="description" rows="8" placeholder="添加备注...">${escape(it.description || "")}</textarea>
+    <div class="caldav-section caldav-section--card caldav-editor-note-card">
+      <div class="caldav-field-label">${isTodo ? "待办备注" : "日程备注"}</div>
+      <textarea class="caldav-input caldav-textarea" data-f="description" rows="5" aria-label="${isTodo ? "待办备注" : "日程备注"}" placeholder="添加备注...">${escape(it.description || "")}</textarea>
     </div>
   </div>
 </div>
@@ -507,21 +504,11 @@ function editorHtml(
 }
 
 function bindEvents(ctx: PanelCtx, dialog: Dialog, el: HTMLElement, it: CalItem, isNew: boolean): void {
+  const previous = { ...it };
   const isTodo = it.kind === "todo";
   const cals = ctx.store.settings.calendars;
   const f = (name: string) => el.querySelector(`[data-f="${name}"]`) as HTMLInputElement;
   const errEl = el.querySelector("[data-error]") as HTMLElement;
-
-  // Tab 切换
-  el.querySelectorAll<HTMLElement>(".caldav-tab").forEach((tab) => {
-    tab.addEventListener("click", () => {
-      const target = tab.dataset.tab!;
-      el.querySelectorAll<HTMLElement>(".caldav-tab").forEach((t) => t.classList.toggle("is-active", t.dataset.tab === target));
-      el.querySelectorAll<HTMLElement>(".caldav-tab-panel").forEach((p) => {
-        (p as HTMLElement).style.display = p.dataset.panel === target ? "block" : "none";
-      });
-    });
-  });
 
   // 日历自定义下拉：图标颜色随所选日历，弹层为暖色浅底（原生 select 弹层无法去除系统蓝高亮）
   const calInput = f("calendar");
@@ -532,7 +519,7 @@ function bindEvents(ctx: PanelCtx, dialog: Dialog, el: HTMLElement, it: CalItem,
     const cal = cals.find((c) => c.url === url);
     calWrap?.style.setProperty("--cal-color", calEventColor(cal));
     const nameEl = calWrap?.querySelector<HTMLElement>(".caldav-cal-name");
-    if (nameEl && cal) nameEl.textContent = cal.displayName;
+    if (nameEl && cal) nameEl.textContent = `${configuredServers(ctx.store.settings).find((s) => s.id === cal.serverId)?.name || "服务器"} / ${cal.displayName}`;
     calPop?.querySelectorAll(".caldav-cal-option").forEach((o) => o.classList.toggle("is-active", (o as HTMLElement).dataset.calUrl === url));
   };
   calWrap?.querySelector<HTMLElement>('[data-action="cal-toggle"]')?.addEventListener("click", (ev) => {
@@ -893,7 +880,7 @@ function bindEvents(ctx: PanelCtx, dialog: Dialog, el: HTMLElement, it: CalItem,
   el.querySelector('[data-action="save"]')?.addEventListener("click", () => {
     try {
       const saved = collect(ctx, el, it);
-      void (isNew ? ctx.sync.createItem(saved) : ctx.sync.updateItem(saved)).then(() => dialog.destroy());
+      void (isNew ? ctx.sync.createItem(saved) : ctx.sync.updateItem(saved, previous)).then(() => dialog.destroy()).catch((e) => { errEl.textContent = e?.message || String(e); });
     } catch (e: any) {
       errEl.textContent = e?.message || String(e);
     }
@@ -925,8 +912,9 @@ function collect(ctx: PanelCtx, el: HTMLElement, it: CalItem): CalItem {
   if (!it.summary) throw new Error("标题不能为空");
   it.calendarUrl = v("calendar");
   const cal = ctx.store.settings.calendars.find((c) => c.url === it.calendarUrl);
+  if (!cal?.enabled || !calendarSupports(cal, it.kind)) throw new Error("请选择已启用且支持此条目类型的日历");
   // 更换日历 = 移动资源
-  if (cal && !it.href.startsWith(cal.url.replace(/\/+$/, ""))) {
+  if (cal && !it.href.startsWith(cal.url.replace(/\/+$/, "") + "/")) {
     it.href = cal.url.replace(/\/+$/, "") + "/" + it.uid + ".ics";
     it.etag = undefined; // 新资源无 etag
   }
@@ -935,14 +923,16 @@ function collect(ctx: PanelCtx, el: HTMLElement, it: CalItem): CalItem {
   const startTime = v("startTime");
   const endDate = v("endDate");
   const endTime = v("endTime");
-  const stampOf = (d: string, t: string) => (!d ? "" : it.allDay ? d : `${d}T${t || "00:00"}:00`);
+  const stampOf = (d: string, t: string) => (!d ? "" : it.allDay || !t ? d : `${d}T${t}:00`);
   if (it.kind === "todo") {
     // 待办的开始/截止时间均可留空
     it.start = stampOf(startDate, startTime);
     it.end = stampOf(endDate, endTime);
-    if (it.start && it.end && parseLocalStamp(it.end).getTime() < parseLocalStamp(it.start).getTime()) {
-      throw new Error("结束时间不能早于开始时间");
+    if (it.start && it.end && parseLocalStamp(it.end).getTime() <= parseLocalStamp(it.start).getTime()) {
+      throw new Error("到期时间需晚于开始时间");
     }
+    if (it.start && it.end && isDateOnly(it.start) !== isDateOnly(it.end)) throw new Error("开始和到期需使用相同的日期类型，请统一选择全天或具体时间");
+    it.allDay = isDateOnly(it.start || it.end || "");
   } else if (it.allDay) {
     if (!startDate) throw new Error("请填写开始日期");
     it.start = startDate;
@@ -957,6 +947,7 @@ function collect(ctx: PanelCtx, el: HTMLElement, it: CalItem): CalItem {
   }
   // 重复
   if (f("repeatOn").checked) {
+    if (!it.start) throw new Error("设置重复规则时请填写开始日期");
     it.rrule = collectRepeat(el);
   } else {
     it.rrule = undefined;
@@ -969,6 +960,7 @@ function collect(ctx: PanelCtx, el: HTMLElement, it: CalItem): CalItem {
     if (!alarms.some((a) => a.minutesBefore === m)) alarms.push({ minutesBefore: m });
   });
   it.alarms = alarms.length ? alarms : undefined;
+  if (it.alarms && !it.start && !it.end) throw new Error("设置相对提醒时请填写开始日期或到期日");
   it.location = v("location") || undefined;
   it.categories = v("categories")
     ? v("categories").split(/[,，]/).map((s) => s.trim()).filter(Boolean)

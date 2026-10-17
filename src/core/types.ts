@@ -58,11 +58,15 @@ export interface CalItem {
   deleted?: boolean;
   /** 服务端 ICS 原文，编辑时在其基础上修改 */
   raw?: string;
+  /** 跨日历移动：目标上传成功后才删除原资源，离线时可恢复。 */
+  movedFrom?: CalItem;
   /** 编辑器会话态：粘贴标题时自动识别其中的日期时间（仅编辑器内使用，不持久化到 ICS） */
   aiParse?: boolean;
 }
 
 export interface CalCalendar {
+  /** 所属服务器配置 ID；旧数据在加载时迁移 */
+  serverId?: string;
   url: string;
   displayName: string;
   /**
@@ -132,7 +136,18 @@ export const DEFAULT_CATEGORIES: CategoryDef[] = [
   { id: "life", name: "生活", color: "#43a05c", icon: "🍀" }
 ];
 
+export interface CalServer {
+  id: string;
+  name: string;
+  serverUrl: string;
+  username: string;
+  password: string;
+  calendarPath: string;
+  channel: "auto" | "proxy" | "direct";
+}
+
 export interface CalSettings {
+  servers?: CalServer[];
   serverUrl: string;
   username: string;
   password: string;
@@ -151,6 +166,8 @@ export interface CalSettings {
   futureDays: number;
   calendars: CalCalendar[];
   defaultCalendarUrl?: string;
+  defaultEventCalendarUrl?: string;
+  defaultTodoCalendarUrl?: string;
   /**
    * 日历视图（年/月/周/日）是否显示待办任务，默认 true。
    * 关掉后日历视图只显示日程事件 —— 待办仍可在「任务视图」与 Dock 列表中看到与勾选，
@@ -220,6 +237,33 @@ export const DEFAULT_SETTINGS: CalSettings = {
   categoryMulti: false,
   includeOverdueTodos: false
 };
+
+/** 兼容旧版单服务器配置；调用方不可通过 origin 猜测账户归属。 */
+export function configuredServers(s: CalSettings): CalServer[] {
+  return s.servers ?? (s.serverUrl ? [{
+    id: "legacy", name: "默认服务器", serverUrl: s.serverUrl,
+    username: s.username, password: s.password, calendarPath: s.calendarPath, channel: s.channel
+  }] : []);
+}
+
+export function serverForCalendar(s: CalSettings, cal: CalCalendar): CalServer | undefined {
+  const servers = configuredServers(s);
+  return cal.serverId ? servers.find((x) => x.id === cal.serverId) : servers.length === 1 ? servers[0] : undefined;
+}
+
+export function calendarSupports(cal: CalCalendar, kind: CalKind): boolean {
+  return (kind === "event" ? cal.supportsEvent : cal.supportsTodo) !== false;
+}
+
+export function creationCalendars(s: CalSettings, kind: CalKind): CalCalendar[] {
+  return s.calendars.filter((c) => c.enabled && calendarSupports(c, kind) && !!serverForCalendar(s, c));
+}
+
+export function defaultCalendarFor(s: CalSettings, kind: CalKind): CalCalendar | undefined {
+  const cals = creationCalendars(s, kind);
+  const preferred = kind === "event" ? s.defaultEventCalendarUrl : s.defaultTodoCalendarUrl;
+  return cals.find((c) => c.url === preferred) || cals.find((c) => c.url === s.defaultCalendarUrl) || cals[0];
+}
 
 export interface SyncState {
   lastSync?: string;

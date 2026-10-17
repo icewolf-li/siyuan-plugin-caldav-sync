@@ -45,8 +45,8 @@ for (const f of files) {
   fs.writeFileSync(d, readSrc(src));
 }
 
-// 2. dev 模式下复制到思源工作空间
-if (workspace && fs.existsSync(workspace)) {
+// 2. 仅显式安装时复制；普通 build/test 永远不触碰思源工作空间。
+if (process.argv.includes("--install-dev") && workspace && fs.existsSync(workspace)) {
   const target = path.join(workspace, "data", "plugins", pluginName);
   try {
     fs.rmSync(target, { recursive: true, force: true });
